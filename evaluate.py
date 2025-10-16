@@ -24,6 +24,41 @@ BRATS_COLOR_MAP = {
 }
 
 
+def calculate_brats_regions_dice(preds, targets, num_classes=4):
+    """
+    Calculate Dice scores for BraTS regions: ET, TC, WT
+    
+    BraTS labels: 0=Background, 1=NCR/NET, 2=Edema, 3=ET
+    Regions:
+        ET (Enhancing Tumor) = label 3
+        TC (Tumor Core) = label 1 + label 3
+        WT (Whole Tumor) = label 1 + label 2 + label 3
+    """
+    et_pred = (preds == 3).float()
+    et_target = (targets == 3).float()
+    
+    tc_pred = ((preds == 1) | (preds == 3)).float()
+    tc_target = ((targets == 1) | (targets == 3)).float()
+    
+    wt_pred = ((preds == 1) | (preds == 2) | (preds == 3)).float()
+    wt_target = ((targets == 1) | (targets == 2) | (targets == 3)).float()
+    
+    def dice_score(pred, target):
+        intersection = (pred * target).sum()
+        return (2. * intersection + 1e-6) / (pred.sum() + target.sum() + 1e-6)
+    
+    et_dice = dice_score(et_pred, et_target).item()
+    tc_dice = dice_score(tc_pred, tc_target).item()
+    wt_dice = dice_score(wt_pred, wt_target).item()
+    
+    return {
+        'ET': et_dice,
+        'TC': tc_dice,
+        'WT': wt_dice,
+        'mean': (et_dice + tc_dice + wt_dice) / 3.0
+    }
+
+
 def evaluate_metrics(model, dataloader, device, num_classes=4):
     model.eval()
     tp = [0] * num_classes
@@ -35,6 +70,10 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
 
     total_correct_pixels = 0
     total_pixels = 0
+    
+    et_dice_sum = 0.0
+    tc_dice_sum = 0.0
+    wt_dice_sum = 0.0
 
     with torch.no_grad():
         for imgs, tgts in dataloader:
@@ -47,6 +86,11 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
             batches += 1
             total_correct_pixels += (preds == tgts).sum().item()
             total_pixels += tgts.numel()
+            
+            brats_regions = calculate_brats_regions_dice(preds, tgts, num_classes)
+            et_dice_sum += brats_regions['ET']
+            tc_dice_sum += brats_regions['TC']
+            wt_dice_sum += brats_regions['WT']
 
             for c in range(num_classes):
                 pc_f = (preds == c).float().view(-1)
@@ -59,11 +103,17 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
                 fp[c] += (pc_f.sum() - inter).item()
                 fn[c] += (tc_f.sum() - inter).item()
 
-    metrics = {'accuracy': 0.0, 'dice_scores': [], 'iou': [], 'precision': [], 'recall': [], 'f1_score': []}
+    metrics = {'accuracy': 0.0, 'dice_scores': [], 'iou': [], 'precision': [], 'recall': [], 'f1_score': [],
+               'ET': 0.0, 'TC': 0.0, 'WT': 0.0, 'avg_regions': 0.0}
 
     if batches > 0:
         if total_pixels > 0:
             metrics['accuracy'] = total_correct_pixels / total_pixels
+        
+        metrics['ET'] = et_dice_sum / batches
+        metrics['TC'] = tc_dice_sum / batches
+        metrics['WT'] = wt_dice_sum / batches
+        metrics['avg_regions'] = (metrics['ET'] + metrics['TC'] + metrics['WT']) / 3.0
         
         for c in range(num_classes):
             metrics['dice_scores'].append(dice_s[c] / batches)

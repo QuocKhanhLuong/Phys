@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from models import ePURE, RobustMedVFL_UNet, print_model_parameters
 from losses import CombinedLoss
-from data_utils import BraTS21Dataset25D, load_brats21_volumes
+from data_utils import BraTS21Dataset25D, load_brats21_volumes, get_brats21_patient_paths
 from evaluate import evaluate_metrics, run_and_print_test_evaluation, visualize_final_results_2_5D
 from utils import calculate_ultimate_common_b1_map
 import config
@@ -97,72 +97,98 @@ if __name__ == "__main__":
     ])
     val_test_transform = A.Compose([ToTensorV2()])
 
-    train_data_path = os.path.join(config.PROJECT_ROOT, 'data', 'training')
-    test_data_path = os.path.join(config.PROJECT_ROOT, 'data', 'testing')
+    train_data_path = config.TRAIN_DATA_PATH
+    test_data_path = config.TEST_DATA_PATH
     
-    print(f"Loading training volumes from: {train_data_path}...")
-    all_train_volumes, all_train_masks = load_brats21_volumes(
-        train_data_path, target_size=(IMG_SIZE, IMG_SIZE)
-    )
-    print(f"Loaded {len(all_train_volumes)} training volumes.")
-
-    print(f"Loading testing volumes from: {test_data_path}...")
-    all_test_volumes, all_test_masks = load_brats21_volumes(
-        test_data_path, target_size=(IMG_SIZE, IMG_SIZE)
-    )
-    print(f"Loaded {len(all_test_volumes)} testing volumes.")
-
-    for i in range(len(all_train_volumes)):
-        for mod_idx in range(4):
-            max_val = np.max(all_train_volumes[i][mod_idx])
-            if max_val > 0:
-                all_train_volumes[i][mod_idx] /= max_val
+    print(f"Loading BraTS21 patient paths from: {train_data_path}...")
+    print("Using LAZY LOADING mode - data loaded on-the-fly during training")
+    patient_paths = get_brats21_patient_paths(train_data_path)
+    print(f"Found {len(patient_paths)} patients total.")
     
-    for i in range(len(all_test_volumes)):
-        for mod_idx in range(4):
-            max_val = np.max(all_test_volumes[i][mod_idx])
-            if max_val > 0:
-                all_test_volumes[i][mod_idx] /= max_val
-
-    indices = list(range(len(all_train_volumes)))
-    train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=42)
-
-    X_train_vols = [all_train_volumes[i] for i in train_indices]
-    y_train_vols = [all_train_masks[i] for i in train_indices]
-    X_val_vols = [all_train_volumes[i] for i in val_indices]
-    y_val_vols = [all_train_masks[i] for i in val_indices]
+    from sklearn.model_selection import train_test_split as split
+    train_val_paths, test_paths = split(patient_paths, test_size=0.15, random_state=42)
+    train_paths, val_paths = split(train_val_paths, test_size=0.176, random_state=42)
+    
+    print(f"Split: {len(train_paths)} train, {len(val_paths)} val, {len(test_paths)} test patients")
+    
+    all_train_volumes = None
+    all_train_masks = None
+    X_val_vols = None
+    y_val_vols = None
+    all_test_volumes = None
+    all_test_masks = None
     
     ePURE_augmenter = ePURE(in_channels=NUM_SLICES * 4).to(DEVICE)
     ePURE_augmenter.eval()
 
     train_dataset = BraTS21Dataset25D(
-        volumes_list=X_train_vols, 
-        masks_list=y_train_vols, 
+        volumes_list=None, 
+        masks_list=None, 
         num_input_slices=NUM_SLICES, 
         transforms=train_transform,
         noise_injector_model=ePURE_augmenter,
-        device=str(DEVICE)
+        device=str(DEVICE),
+        lazy_load=True,
+        patient_paths=train_paths
     )
     val_dataset = BraTS21Dataset25D(
-        volumes_list=X_val_vols, 
-        masks_list=y_val_vols, 
+        volumes_list=None, 
+        masks_list=None, 
         num_input_slices=NUM_SLICES, 
-        transforms=val_test_transform
+        transforms=val_test_transform,
+        lazy_load=True,
+        patient_paths=val_paths
     )
     test_dataset = BraTS21Dataset25D(
-        volumes_list=all_test_volumes, 
-        masks_list=all_test_masks, 
+        volumes_list=None, 
+        masks_list=None, 
         num_input_slices=NUM_SLICES, 
-        transforms=val_test_transform
+        transforms=val_test_transform,
+        lazy_load=True,
+        patient_paths=test_paths
     )
 
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
+    NUM_WORKERS = 16
+    train_dataloader = DataLoader(
+        train_dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=NUM_WORKERS, 
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True
+    )
+    val_dataloader = DataLoader(
+        val_dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=NUM_WORKERS, 
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True
+    )
+    test_dataloader = DataLoader(
+        test_dataset, 
+        batch_size=BATCH_SIZE, 
+        shuffle=False, 
+        num_workers=NUM_WORKERS, 
+        pin_memory=True,
+        prefetch_factor=2,
+        persistent_workers=True
+    )
     
     print(f"\nTraining samples: {len(train_dataset)}, Validation: {len(val_dataset)}, Test: {len(test_dataset)}")
     print("-" * 60)
 
+    print("\nLoading subset of volumes for B1 map calculation...")
+    subset_volumes, _ = load_brats21_volumes(train_data_path, target_size=(IMG_SIZE, IMG_SIZE), max_patients=50)
+    
+    for i in range(len(subset_volumes)):
+        for mod_idx in range(4):
+            max_val = np.max(subset_volumes[i][mod_idx])
+            if max_val > 0:
+                subset_volumes[i][mod_idx] /= max_val
+    
     def convert_volumes_to_tensor(volumes_list):
         all_slices = []
         for vol in volumes_list:
@@ -170,13 +196,17 @@ if __name__ == "__main__":
                 all_slices.append(torch.from_numpy(vol[:, :, :, i]).mean(dim=0, keepdim=True))
         return torch.stack(all_slices, dim=0).float()
     
-    all_images_tensor = convert_volumes_to_tensor(X_train_vols + X_val_vols + all_test_volumes)
+    all_images_tensor = convert_volumes_to_tensor(subset_volumes)
     dataset_name = "brats21"
     common_b1_map = calculate_ultimate_common_b1_map(
         all_images=all_images_tensor,
         device=str(DEVICE),
         save_path=f"{dataset_name}_ultimate_common_b1_map.pth"
     )
+    
+    del subset_volumes
+    import gc
+    gc.collect()
     
     print("Initializing model...")
     model = RobustMedVFL_UNet(n_channels=NUM_SLICES * 4, n_classes=NUM_CLASSES).to(DEVICE)
@@ -263,6 +293,12 @@ if __name__ == "__main__":
                 print(f"=> Class {c_idx:<3}: Dice: {all_dice[c_idx]:.4f}, IoU: {all_iou[c_idx]:.4f}, "
                       f"Precision: {all_precision[c_idx]:.4f}, Recall: {all_recall[c_idx]:.4f}, F1: {all_f1[c_idx]:.4f}")
 
+            print("   --- BraTS Regions (Benchmark Metrics) ---")
+            print(f"=> ET (Enhancing Tumor): {val_metrics['ET']:.4f}")
+            print(f"=> TC (Tumor Core):      {val_metrics['TC']:.4f}")
+            print(f"=> WT (Whole Tumor):     {val_metrics['WT']:.4f}")
+            print(f"=> Average (ET+TC+WT):   {val_metrics['avg_regions']:.4f}")
+            
             print("   --- Summary Metrics ---")
             print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f}, IoU: {avg_fg_iou:.4f}, "
                   f"Precision: {avg_fg_precision:.4f}, Recall: {avg_fg_recall:.4f}, F1: {avg_fg_f1:.4f}")
@@ -301,12 +337,20 @@ if __name__ == "__main__":
         num_classes=NUM_CLASSES,
         num_slices=NUM_SLICES * 4
     )
+    
+    print("\nLoading test volumes for visualization...")
+    test_vols_viz, test_masks_viz = load_brats21_volumes(train_data_path, target_size=(IMG_SIZE, IMG_SIZE), max_patients=10)
+    for i in range(len(test_vols_viz)):
+        for mod_idx in range(4):
+            max_val = np.max(test_vols_viz[i][mod_idx])
+            if max_val > 0:
+                test_vols_viz[i][mod_idx] /= max_val
 
     visualize_final_results_2_5D(
-        volumes_np=all_test_volumes,
-        masks_np=all_test_masks,
+        volumes_np=test_vols_viz,
+        masks_np=test_masks_viz,
         num_classes=NUM_CLASSES,
-        num_samples=10,
+        num_samples=min(10, len(test_vols_viz)),
         device=DEVICE,
         num_slices=NUM_SLICES * 4
     )
