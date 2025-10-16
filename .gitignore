@@ -53,8 +53,10 @@ ENV/
 # Data files (too large)
 database/
 data/
+BraTS21/
 *.nii
 *.nii.gz
+*.tar
 
 # B1 maps (generated files)
 *b1_map*.pth

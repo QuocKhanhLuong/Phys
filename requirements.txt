@@ -1,36 +1,22 @@
-# ============================================================================
-# Requirements for PhysicsMed - Medical Image Segmentation
-# Versions tested and working on Kaggle environment
-# ============================================================================
-
-# Deep Learning Framework
 torch==2.6.0
 torchvision==0.21.0
 
-# Medical Image Processing
 nibabel==5.3.2
 scikit-image==0.25.2
 scipy==1.15.3
 
-# Data Augmentation
 albumentations==2.0.8
 opencv-python==4.12.0.88
 
-# Machine Learning & Data Processing
 scikit-learn==1.2.2
 numpy==1.26.4
 pandas==2.2.3
 
-# Visualization
 matplotlib==3.7.2
 
-# Image Processing Utilities
 Pillow==11.3.0
 imageio==2.37.0
 
-# Progress Bar
 tqdm==4.67.1
 
-# Additional Scientific Computing
 h5py==3.14.0
-
