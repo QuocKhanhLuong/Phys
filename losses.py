@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, List
 
-
 class FocalTverskyLoss(nn.Module):
     def __init__(self, 
                  num_classes: int, 

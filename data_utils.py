@@ -47,6 +47,8 @@ class BraTS21Dataset25D(Dataset):
             axis=-1
         ).astype(np.float32)
         
+        image_stack = image_stack.reshape(image_stack.shape[0], image_stack.shape[1], -1)
+        
         mask = current_mask_volume[:, :, center_slice_idx].astype(np.int64)
         
         if self.transforms:
@@ -54,7 +56,7 @@ class BraTS21Dataset25D(Dataset):
             image_tensor = augmented['image']
             mask_tensor = augmented['mask']
         else:
-            image_tensor = torch.from_numpy(image_stack).permute(2, 0, 1)
+            image_tensor = torch.from_numpy(image_stack.transpose(2, 0, 1))
             mask_tensor = torch.from_numpy(mask)
     
         if self.noise_injector_model is not None:
@@ -79,72 +81,76 @@ def load_brats21_volumes(directory, target_size=(224, 224), max_patients=None):
         print(f"Error: Dataset directory not found at {directory}.")
         return [], []
 
-    patient_folders = sorted(glob.glob(os.path.join(directory, 'BraTS2021_*')))
-    patient_count = 0
+    patient_folders = sorted(glob.glob(os.path.join(directory, 'patient*')))
+    if not patient_folders:
+        patient_folders = sorted(glob.glob(os.path.join(directory, 'BraTS2021_*')))
+    
+    volume_count = 0
 
     for patient_path in patient_folders:
-        if max_patients and patient_count >= max_patients:
+        if max_patients and volume_count >= max_patients:
             break
         
         if not os.path.isdir(patient_path):
             continue
 
         patient_id = os.path.basename(patient_path)
+        file_4d = os.path.join(patient_path, f'{patient_id}_4d.nii')
         
-        t1_path = os.path.join(patient_path, f'{patient_id}_t1.nii.gz')
-        t1ce_path = os.path.join(patient_path, f'{patient_id}_t1ce.nii.gz')
-        t2_path = os.path.join(patient_path, f'{patient_id}_t2.nii.gz')
-        flair_path = os.path.join(patient_path, f'{patient_id}_flair.nii.gz')
-        seg_path = os.path.join(patient_path, f'{patient_id}_seg.nii.gz')
-        
-        if not all(os.path.exists(p) for p in [t1_path, t1ce_path, t2_path, flair_path]):
-            print(f"Warning: Missing modality files for {patient_id}. Skipping.")
+        if not os.path.exists(file_4d):
+            print(f"Warning: 4D file not found for {patient_id}. Skipping.")
             continue
 
         try:
-            t1 = nib.load(t1_path).get_fdata()
-            t1ce = nib.load(t1ce_path).get_fdata()
-            t2 = nib.load(t2_path).get_fdata()
-            flair = nib.load(flair_path).get_fdata()
+            data_4d = nib.load(file_4d).get_fdata()
+            gt_files = sorted(glob.glob(os.path.join(patient_path, f'{patient_id}_frame*_gt.nii')))
             
-            volume = np.stack([t1, t1ce, t2, flair], axis=0)
+            if not gt_files:
+                print(f"Warning: No ground truth files for {patient_id}. Skipping.")
+                continue
             
-            mask = None
-            if os.path.exists(seg_path):
-                mask_data = nib.load(seg_path).get_fdata()
-                mask = np.zeros_like(mask_data, dtype=np.uint8)
-                mask[mask_data == 1] = 1
-                mask[mask_data == 2] = 2
-                mask[(mask_data == 1) | (mask_data == 4)] = 3
-
-            num_slices = volume.shape[3]
-            resized_volume = np.zeros((4, target_size[0], target_size[1], num_slices), dtype=np.float32)
-            resized_mask = None
-            if mask is not None:
+            for gt_file in gt_files:
+                gt_basename = os.path.basename(gt_file)
+                frame_str = gt_basename.split('_')[1]
+                frame_num = int(frame_str.replace('frame', ''))
+                frame_idx = frame_num - 1
+                
+                if frame_idx >= data_4d.shape[3]:
+                    print(f"Warning: Frame {frame_num} out of range for {patient_id}. Skipping.")
+                    continue
+                
+                frame_volume = data_4d[:, :, :, frame_idx]
+                volume = np.stack([frame_volume] * 4, axis=0)
+                
+                gt_data = nib.load(gt_file).get_fdata()
+                mask = gt_data.astype(np.uint8)
+                
+                num_slices = volume.shape[3]
+                resized_volume = np.zeros((4, target_size[0], target_size[1], num_slices), dtype=np.float32)
                 resized_mask = np.zeros((target_size[0], target_size[1], num_slices), dtype=np.uint8)
-
-            for i in range(num_slices):
-                for mod_idx in range(4):
-                    resized_volume[mod_idx, :, :, i] = resize(
-                        volume[mod_idx, :, :, i], target_size, order=1, preserve_range=True,
-                        anti_aliasing=True, mode='reflect'
-                    )
-                if mask is not None:
+                
+                for i in range(num_slices):
+                    for mod_idx in range(4):
+                        resized_volume[mod_idx, :, :, i] = resize(
+                            volume[mod_idx, :, :, i], target_size, order=1, preserve_range=True,
+                            anti_aliasing=True, mode='reflect'
+                        )
                     resized_mask[:, :, i] = resize(
                         mask[:, :, i], target_size, order=0, preserve_range=True,
                         anti_aliasing=False, mode='reflect'
                     )
-            
-            volumes_list.append(resized_volume)
-            if resized_mask is not None:
+                
+                volumes_list.append(resized_volume)
                 masks_list.append(resized_mask)
-            
-            patient_count += 1
-            print(f"Loaded patient {patient_count}: {patient_id}")
+                volume_count += 1
+                print(f"Loaded {patient_id} - {frame_str}")
             
         except Exception as e:
             print(f"Error processing {patient_id}: {e}")
+            import traceback
+            traceback.print_exc()
             continue
     
+    print(f"\nTotal: {len(volumes_list)} volumes from {len(patient_folders)} patients")
     return volumes_list, masks_list
 

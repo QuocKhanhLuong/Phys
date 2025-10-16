@@ -239,6 +239,8 @@ def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples,
             axis=-1
         ).astype(np.float32)
         
+        image_stack_np = image_stack_np.reshape(image_stack_np.shape[0], image_stack_np.shape[1], -1)
+        
         transformed = vis_transform(image=image_stack_np)
         model_input = transformed['image'].unsqueeze(0).to(device)
 
@@ -276,5 +278,12 @@ def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples,
         fig.legend(handles=legend_elements, loc='lower center', ncol=3, bbox_to_anchor=(0.5, -0.02))
         
         plt.tight_layout(rect=[0, 0.05, 1, 0.95])
+        
+        os.makedirs('visualizations', exist_ok=True)
+        save_path = f'visualizations/sample_{i+1}_vol{vol_idx}_slice{center_slice_idx}.png'
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"   Saved: {save_path}")
+        
         plt.show()
+        plt.close()
 

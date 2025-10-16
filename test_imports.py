@@ -52,6 +52,7 @@ print("\n--- Testing Model Initialization ---")
 try:
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = RobustMedVFL_UNet(n_channels=20, n_classes=4)
+    model.eval()  # Set to eval mode to avoid BatchNorm issues with small tensors
     print(f"✓ Model initialized successfully")
     print(f"  Input: 20 channels (4 modalities × 5 slices)")
     print(f"  Output: 4 classes")

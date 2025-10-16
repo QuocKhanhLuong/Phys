@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import os
+import time
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 import albumentations as A
@@ -9,22 +10,71 @@ from albumentations.pytorch import ToTensorV2
 from itertools import chain
 import cv2
 import torch.multiprocessing as mp
+from tqdm import tqdm
 
 from models import ePURE, RobustMedVFL_UNet, print_model_parameters
 from losses import CombinedLoss
 from data_utils import BraTS21Dataset25D, load_brats21_volumes
 from evaluate import evaluate_metrics, run_and_print_test_evaluation, visualize_final_results_2_5D
 from utils import calculate_ultimate_common_b1_map
+import config
 
 
-NUM_EPOCHS = 250
-NUM_CLASSES = 4
-LEARNING_RATE = 1e-3
+NUM_EPOCHS = config.NUM_EPOCHS
+NUM_CLASSES = config.NUM_CLASSES
+LEARNING_RATE = config.LEARNING_RATE
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-IMG_SIZE = 224
-BATCH_SIZE = 24
-NUM_SLICES = 5
-EARLY_STOP_PATIENCE = 30
+IMG_SIZE = config.IMG_SIZE
+BATCH_SIZE = config.BATCH_SIZE
+NUM_SLICES = config.NUM_SLICES
+EARLY_STOP_PATIENCE = config.EARLY_STOP_PATIENCE
+
+
+def calculate_gflops(model, input_size=(1, 20, 224, 224), device='cuda'):
+    """Calculate GFLOPs (Giga Floating Point Operations) for the model."""
+    model.eval()
+    input_tensor = torch.randn(input_size).to(device)
+    
+    total_ops = 0
+    hooks = []
+    
+    def count_conv2d(m, x, y):
+        nonlocal total_ops
+        batch_size = y.shape[0]
+        output_height, output_width = y.shape[2:]
+        kernel_height, kernel_width = m.kernel_size
+        in_channels = m.in_channels
+        out_channels = m.out_channels
+        groups = m.groups
+        
+        ops_per_position = kernel_height * kernel_width * (in_channels // groups)
+        total_positions = batch_size * output_height * output_width * out_channels
+        total_ops += ops_per_position * total_positions
+    
+    def count_linear(m, x, y):
+        nonlocal total_ops
+        total_ops += m.in_features * m.out_features * y.shape[0]
+    
+    def count_batchnorm(m, x, y):
+        nonlocal total_ops
+        total_ops += y.numel() * 2
+    
+    for m in model.modules():
+        if isinstance(m, torch.nn.Conv2d):
+            hooks.append(m.register_forward_hook(count_conv2d))
+        elif isinstance(m, torch.nn.Linear):
+            hooks.append(m.register_forward_hook(count_linear))
+        elif isinstance(m, (torch.nn.BatchNorm2d, torch.nn.GroupNorm)):
+            hooks.append(m.register_forward_hook(count_batchnorm))
+    
+    with torch.no_grad():
+        model(input_tensor)
+    
+    for hook in hooks:
+        hook.remove()
+    
+    gflops = total_ops / 1e9
+    return gflops
 
 
 if __name__ == "__main__":
@@ -47,9 +97,8 @@ if __name__ == "__main__":
     ])
     val_test_transform = A.Compose([ToTensorV2()])
 
-    base_dataset_root = '/Users/alvinluong/PhysicsMed/BraTS21'
-    train_data_path = os.path.join(base_dataset_root, 'training')
-    test_data_path = os.path.join(base_dataset_root, 'testing')
+    train_data_path = os.path.join(config.PROJECT_ROOT, 'data', 'training')
+    test_data_path = os.path.join(config.PROJECT_ROOT, 'data', 'testing')
     
     print(f"Loading training volumes from: {train_data_path}...")
     all_train_volumes, all_train_masks = load_brats21_volumes(
@@ -118,7 +167,7 @@ if __name__ == "__main__":
         all_slices = []
         for vol in volumes_list:
             for i in range(vol.shape[3]):
-                all_slices.append(torch.from_numpy(vol[:, :, :, i]).unsqueeze(0).mean(dim=1, keepdim=True))
+                all_slices.append(torch.from_numpy(vol[:, :, :, i]).mean(dim=0, keepdim=True))
         return torch.stack(all_slices, dim=0).float()
     
     all_images_tensor = convert_volumes_to_tensor(X_train_vols + X_val_vols + all_test_volumes)
@@ -133,6 +182,9 @@ if __name__ == "__main__":
     model = RobustMedVFL_UNet(n_channels=NUM_SLICES * 4, n_classes=NUM_CLASSES).to(DEVICE)
     print_model_parameters(model)
     
+    gflops = calculate_gflops(model, input_size=(1, NUM_SLICES * 4, IMG_SIZE, IMG_SIZE), device=str(DEVICE))
+    print(f"Model GFLOPs: {gflops:.2f} G")
+    
     criterion = CombinedLoss(
         num_classes=NUM_CLASSES,
         initial_loss_weights=[0.5, 0.4, 0.1]
@@ -145,13 +197,17 @@ if __name__ == "__main__":
     
     best_val_metric = 0.0
     epochs_no_improve = 0
+    total_train_start = time.time()
 
     for epoch in range(NUM_EPOCHS):
+        epoch_start_time = time.time()
         print(f"\n--- Epoch {epoch + 1}/{NUM_EPOCHS} ---")
         
         model.train()
         epoch_train_loss = 0.0
-        for images, targets in train_dataloader:
+        
+        train_pbar = tqdm(train_dataloader, desc=f"Training", ncols=100)
+        for images, targets in train_pbar:
             images, targets = images.to(DEVICE), targets.to(DEVICE)
             optimizer.zero_grad()
             
@@ -177,8 +233,11 @@ if __name__ == "__main__":
             optimizer.step()
             epoch_train_loss += loss.item()
             
+            train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
+            
         avg_train_loss = epoch_train_loss / len(train_dataloader)
-        print(f"   Epoch {epoch+1} - Training Loss: {avg_train_loss:.4f}")
+        epoch_time = time.time() - epoch_start_time
+        print(f"   Training Loss: {avg_train_loss:.4f} | Time: {epoch_time:.2f}s")
 
         if val_dataloader.dataset and len(val_dataloader.dataset) > 0:
             print("   Evaluating on validation set...")
@@ -208,6 +267,7 @@ if __name__ == "__main__":
             print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f}, IoU: {avg_fg_iou:.4f}, "
                   f"Precision: {avg_fg_precision:.4f}, Recall: {avg_fg_recall:.4f}, F1: {avg_fg_f1:.4f}")
             print(f"=> Overall Accuracy: {val_accuracy:.4f} | Current LR: {current_lr:.6f}")
+            print(f"=> Epoch Time: {epoch_time:.2f}s")
 
             scheduler.step(avg_fg_dice)
             if avg_fg_dice > best_val_metric:
@@ -224,7 +284,16 @@ if __name__ == "__main__":
             print(f"\nEarly stopping triggered after {EARLY_STOP_PATIENCE} epochs with no improvement.")
             break
 
-    print("\n--- Training Finished ---")
+    total_train_time = time.time() - total_train_start
+    hours = int(total_train_time // 3600)
+    minutes = int((total_train_time % 3600) // 60)
+    seconds = int(total_train_time % 60)
+    
+    print("\n" + "=" * 60)
+    print(f"--- Training Finished ---")
+    print(f"Total Training Time: {hours}h {minutes}m {seconds}s ({total_train_time:.2f}s)")
+    print(f"Best Validation Dice Score: {best_val_metric:.4f}")
+    print("=" * 60 + "\n")
     
     run_and_print_test_evaluation(
         test_dataloader=test_dataloader,
