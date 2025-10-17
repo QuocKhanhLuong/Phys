@@ -54,6 +54,7 @@ ENV/
 database/
 data/
 BraTS21/
+BraTS21_preprocessed/
 *.nii
 *.nii.gz
 *.tar

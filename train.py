@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from models import ePURE, RobustMedVFL_UNet, print_model_parameters
 from losses import CombinedLoss
-from data_utils import BraTS21Dataset25D, load_brats21_volumes, get_brats21_patient_paths
+from data_utils import BraTS21Dataset25D, load_brats21_volumes, get_brats21_patient_paths, get_patient_ids_from_npy
 from evaluate import evaluate_metrics, run_and_print_test_evaluation, visualize_final_results_2_5D
 from utils import calculate_ultimate_common_b1_map
 import config
@@ -99,56 +99,94 @@ if __name__ == "__main__":
 
     train_data_path = config.TRAIN_DATA_PATH
     test_data_path = config.TEST_DATA_PATH
+    use_npy = config.USE_NPY
+    npy_dir = config.NPY_DIR
     
-    print(f"Loading BraTS21 patient paths from: {train_data_path}...")
-    print("Using LAZY LOADING mode - data loaded on-the-fly during training")
-    patient_paths = get_brats21_patient_paths(train_data_path)
-    print(f"Found {len(patient_paths)} patients total.")
-    
-    from sklearn.model_selection import train_test_split as split
-    train_val_paths, test_paths = split(patient_paths, test_size=0.15, random_state=42)
-    train_paths, val_paths = split(train_val_paths, test_size=0.176, random_state=42)
-    
-    print(f"Split: {len(train_paths)} train, {len(val_paths)} val, {len(test_paths)} test patients")
-    
-    all_train_volumes = None
-    all_train_masks = None
-    X_val_vols = None
-    y_val_vols = None
-    all_test_volumes = None
-    all_test_masks = None
-    
-    ePURE_augmenter = ePURE(in_channels=NUM_SLICES * 4).to(DEVICE)
-    ePURE_augmenter.eval()
+    if use_npy:
+        print(f"Using PREPROCESSED NPY mode from: {npy_dir}")
+        if not os.path.exists(npy_dir):
+            print(f"ERROR: NPY directory not found: {npy_dir}")
+            print("Run preprocessing first or set USE_NPY=False in config.py")
+            raise FileNotFoundError(f"NPY directory not found: {npy_dir}")
+        
+        patient_ids = get_patient_ids_from_npy(npy_dir)
+        print(f"Found {len(patient_ids)} preprocessed patients")
+        
+        from sklearn.model_selection import train_test_split as split
+        train_val_ids, test_ids = split(patient_ids, test_size=0.15, random_state=42)
+        train_ids, val_ids = split(train_val_ids, test_size=0.176, random_state=42)
+        
+        print(f"Split: {len(train_ids)} train, {len(val_ids)} val, {len(test_ids)} test")
+        
+        ePURE_augmenter = ePURE(in_channels=NUM_SLICES * 4).to(DEVICE)
+        ePURE_augmenter.eval()
+        
+        train_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None, 
+            num_input_slices=NUM_SLICES, 
+            transforms=train_transform,
+            noise_injector_model=ePURE_augmenter,
+            device=str(DEVICE),
+            use_npy=True,
+            npy_dir=npy_dir,
+            patient_ids=train_ids
+        )
+        val_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None,
+            num_input_slices=NUM_SLICES, 
+            transforms=val_test_transform,
+            use_npy=True,
+            npy_dir=npy_dir,
+            patient_ids=val_ids
+        )
+        test_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None,
+            num_input_slices=NUM_SLICES, 
+            transforms=val_test_transform,
+            use_npy=True,
+            npy_dir=npy_dir,
+            patient_ids=test_ids
+        )
+    else:
+        print(f"Loading BraTS21 patient paths from: {train_data_path}...")
+        print("Using LAZY LOADING mode - data loaded on-the-fly during training")
+        patient_paths = get_brats21_patient_paths(train_data_path)
+        print(f"Found {len(patient_paths)} patients total.")
+        
+        from sklearn.model_selection import train_test_split as split
+        train_val_paths, test_paths = split(patient_paths, test_size=0.15, random_state=42)
+        train_paths, val_paths = split(train_val_paths, test_size=0.176, random_state=42)
+        
+        print(f"Split: {len(train_paths)} train, {len(val_paths)} val, {len(test_paths)} test patients")
+        
+        ePURE_augmenter = ePURE(in_channels=NUM_SLICES * 4).to(DEVICE)
+        ePURE_augmenter.eval()
 
-    train_dataset = BraTS21Dataset25D(
-        volumes_list=None, 
-        masks_list=None, 
-        num_input_slices=NUM_SLICES, 
-        transforms=train_transform,
-        noise_injector_model=ePURE_augmenter,
-        device=str(DEVICE),
-        lazy_load=True,
-        patient_paths=train_paths
-    )
-    val_dataset = BraTS21Dataset25D(
-        volumes_list=None, 
-        masks_list=None, 
-        num_input_slices=NUM_SLICES, 
-        transforms=val_test_transform,
-        lazy_load=True,
-        patient_paths=val_paths
-    )
-    test_dataset = BraTS21Dataset25D(
-        volumes_list=None, 
-        masks_list=None, 
-        num_input_slices=NUM_SLICES, 
-        transforms=val_test_transform,
-        lazy_load=True,
-        patient_paths=test_paths
-    )
+        train_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None,
+            num_input_slices=NUM_SLICES, 
+            transforms=train_transform,
+            noise_injector_model=ePURE_augmenter,
+            device=str(DEVICE),
+            lazy_load=True,
+            patient_paths=train_paths
+        )
+        val_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None,
+            num_input_slices=NUM_SLICES, 
+            transforms=val_test_transform,
+            lazy_load=True,
+            patient_paths=val_paths
+        )
+        test_dataset = BraTS21Dataset25D(
+            volumes_list=None, masks_list=None,
+            num_input_slices=NUM_SLICES, 
+            transforms=val_test_transform,
+            lazy_load=True,
+            patient_paths=test_paths
+        )
 
-    NUM_WORKERS = 16
+    NUM_WORKERS = 8
     train_dataloader = DataLoader(
         train_dataset, 
         batch_size=BATCH_SIZE, 
