@@ -10,128 +10,115 @@ import json
 import cv2
 from multiprocessing import Pool
 from functools import partial
+from collections import OrderedDict
 
 class BraTS21Dataset25D(Dataset):
-    def __init__(self, volumes_list, masks_list, num_input_slices=5, transforms=None, 
-                 noise_injector_model=None, device: str = 'cpu', lazy_load=False, patient_paths=None,
-                 use_npy=False, npy_dir=None, patient_ids=None, cache_volumes=True):
+    """Optimized 2.5D Dataset with LRU cache and memmap"""
+    
+    def __init__(self, npy_dir, patient_ids=None, num_input_slices=5, 
+                 transforms=None, max_cache_size=15, use_memmap=True):
         if num_input_slices % 2 == 0:
             raise ValueError("num_input_slices must be odd.")
         
-        self.lazy_load = lazy_load
-        self.use_npy = use_npy
         self.num_input_slices = num_input_slices
         self.transforms = transforms
-        self.noise_injector_model = noise_injector_model
-        self.device = device
-        self.cache_volumes = cache_volumes
-        self._volume_cache = {} if cache_volumes else None
+        self.max_cache_size = max_cache_size
+        self.use_memmap = use_memmap
+        self._volume_cache = OrderedDict()  # LRU cache
         
-        if use_npy and npy_dir is not None:
-            volumes_dir = os.path.join(npy_dir, 'volumes')
-            masks_dir = os.path.join(npy_dir, 'masks')
-            
-            if patient_ids is not None:
-                self.volume_paths = [os.path.join(volumes_dir, f'{p}.npy') for p in patient_ids]
-                self.mask_paths = [os.path.join(masks_dir, f'{p}.npy') for p in patient_ids]
-            else:
-                self.volume_paths = sorted(glob.glob(os.path.join(volumes_dir, '*.npy')))
-                self.mask_paths = sorted(glob.glob(os.path.join(masks_dir, '*.npy')))
-            
-            self.volumes = None
-            self.masks = None
-            self.patient_paths = None
-        elif lazy_load and patient_paths is not None:
-            self.patient_paths = patient_paths
-            self.volumes = None
-            self.masks = None
-            self.volume_paths = None
-            self.mask_paths = None
+        volumes_dir = os.path.join(npy_dir, 'volumes')
+        masks_dir = os.path.join(npy_dir, 'masks')
+        
+        if patient_ids is not None:
+            self.volume_paths = [os.path.join(volumes_dir, f'{p}.npy') for p in patient_ids]
+            self.mask_paths = [os.path.join(masks_dir, f'{p}.npy') for p in patient_ids]
         else:
-            self.volumes = volumes_list
-            self.masks = masks_list
-            self.patient_paths = None
-            self.volume_paths = None
-            self.mask_paths = None
+            self.volume_paths = sorted(glob.glob(os.path.join(volumes_dir, '*.npy')))
+            self.mask_paths = sorted(glob.glob(os.path.join(masks_dir, '*.npy')))
+        
+        metadata_path = os.path.join(npy_dir, 'metadata.json')
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(
+                f"metadata.json not found: {metadata_path}\n"
+                f"Run: python preprocess.py --update-metadata"
+            )
+        
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        patient_info = metadata.get('patient_info', {})
+        if not patient_info:
+            raise ValueError(
+                "metadata.json missing 'patient_info'\n"
+                "Run: python preprocess.py --update-metadata"
+            )
         
         self.index_map = []
-        radius = (self.num_input_slices - 1) // 2
+        radius = (num_input_slices - 1) // 2
         
-        if use_npy and self.volume_paths is not None and self.mask_paths is not None and npy_dir is not None:
-            metadata_path = os.path.join(npy_dir, 'metadata.json')
-            patient_info = {}
+        for vol_idx, vol_path in enumerate(self.volume_paths):
+            patient_id = os.path.basename(vol_path).replace('.npy', '')
             
-            if os.path.exists(metadata_path):
-                try:
-                    with open(metadata_path, 'r') as f:
-                        metadata = json.load(f)
-                        patient_info = metadata.get('patient_info', {})
-                    print(f"Loaded metadata: {len(patient_info)} patients")
-                except Exception as e:
-                    print(f"Metadata load failed: {e}, using fallback")
+            if patient_id not in patient_info:
+                raise KeyError(
+                    f"Patient {patient_id} not in metadata\n"
+                    f"Run: python preprocess.py --update-metadata"
+                )
             
-            for vol_idx in range(len(self.volume_paths)):
-                patient_id = os.path.basename(self.volume_paths[vol_idx]).replace('.npy', '')
-                
-                if patient_id in patient_info:
-                    num_slices = patient_info[patient_id]['num_slices']
-                else:
-                    mask = np.load(self.mask_paths[vol_idx])
-                    num_slices = mask.shape[2]
-                
-                for slice_idx in range(radius, num_slices - radius):
-                    self.index_map.append((vol_idx, slice_idx))
-        elif not lazy_load and self.volumes is not None:
-            for vol_idx, vol in enumerate(self.volumes):
-                num_slices = vol.shape[3]
-                for slice_idx in range(radius, num_slices - radius):
-                    self.index_map.append((vol_idx, slice_idx))
-        elif lazy_load and self.patient_paths is not None:
-            for vol_idx in range(len(self.patient_paths)):
-                sample_path = self.patient_paths[vol_idx]
-                seg_file = os.path.join(sample_path, f"{os.path.basename(sample_path)}_seg.nii.gz")
-                if os.path.exists(seg_file):
-                    seg_data = nib.load(seg_file)
-                    num_slices = seg_data.shape[2]
-                    for slice_idx in range(radius, num_slices - radius):
-                        self.index_map.append((vol_idx, slice_idx))
+            num_slices = patient_info[patient_id]['num_slices']
+            
+            for slice_idx in range(radius, num_slices - radius):
+                self.index_map.append((vol_idx, slice_idx))
+        
+        print(f"Dataset: {len(self.index_map)} slices from {len(self.volume_paths)} patients")
+        print(f"Cache: max {max_cache_size} volumes, Memmap: {use_memmap}")
+    
+    def _load_volume(self, vol_idx):
+        """Load volume with LRU cache management"""
+        if vol_idx in self._volume_cache:
+            # Move to end (most recently used)
+            self._volume_cache.move_to_end(vol_idx)
+            return self._volume_cache[vol_idx]
+        
+        # Load from disk
+        if self.use_memmap:
+            # Memory-mapped arrays - faster & less memory
+            current_volume = np.load(self.volume_paths[vol_idx], mmap_mode='r')
+            current_mask_volume = np.load(self.mask_paths[vol_idx], mmap_mode='r')
+        else:
+            current_volume = np.load(self.volume_paths[vol_idx])
+            current_mask_volume = np.load(self.mask_paths[vol_idx])
+        
+        # Add to cache
+        self._volume_cache[vol_idx] = (current_volume, current_mask_volume)
+        
+        # Remove oldest if cache full
+        if len(self._volume_cache) > self.max_cache_size:
+            self._volume_cache.popitem(last=False)
+        
+        return current_volume, current_mask_volume
     
     def __len__(self):
         return len(self.index_map)
 
     def __getitem__(self, idx):
         vol_idx, center_slice_idx = self.index_map[idx]
-        
-        if self._volume_cache is not None and vol_idx in self._volume_cache:
-            current_volume, current_mask_volume = self._volume_cache[vol_idx]
-        else:
-            if self.use_npy and self.volume_paths is not None and self.mask_paths is not None:
-                current_volume = np.load(self.volume_paths[vol_idx])
-                current_mask_volume = np.load(self.mask_paths[vol_idx])
-            elif self.lazy_load and self.patient_paths is not None:
-                current_volume, current_mask_volume = self._load_volume_on_demand(vol_idx)
-            elif self.volumes is not None and self.masks is not None:
-                current_volume = self.volumes[vol_idx]
-                current_mask_volume = self.masks[vol_idx]
-            else:
-                raise ValueError("Dataset not properly initialized")
-            
-            if self._volume_cache is not None:
-                self._volume_cache[vol_idx] = (current_volume, current_mask_volume)
+        current_volume, current_mask_volume = self._load_volume(vol_idx)
         
         num_slices_in_vol = current_volume.shape[3]
-    
         radius = (self.num_input_slices - 1) // 2
-        offsets = range(-radius, radius + 1)
         
-        slice_indices = [np.clip(center_slice_idx + offset, 0, num_slices_in_vol - 1) for offset in offsets]
+        # Vectorized slice extraction
+        slice_indices = np.clip(
+            center_slice_idx + np.arange(-radius, radius + 1),
+            0, num_slices_in_vol - 1
+        )
         
-        image_stack = np.stack(
-            [current_volume[:, :, :, i].transpose(1, 2, 0) for i in slice_indices],
-            axis=-1
-        ).astype(np.float32)
-        
-        image_stack = image_stack.reshape(image_stack.shape[0], image_stack.shape[1], -1)
+        # Extract all slices at once: (4, H, W, num_slices) -> (H, W, 4*num_slices)
+        image_stack = current_volume[:, :, :, slice_indices]  # (4, H, W, num_slices)
+        image_stack = image_stack.transpose(1, 2, 0, 3)  # (H, W, 4, num_slices)
+        H, W = image_stack.shape[0], image_stack.shape[1]
+        image_stack = image_stack.reshape(H, W, -1).astype(np.float32)
         
         mask = current_mask_volume[:, :, center_slice_idx].astype(np.int64)
         
@@ -143,67 +130,7 @@ class BraTS21Dataset25D(Dataset):
             image_tensor = torch.from_numpy(image_stack.transpose(2, 0, 1))
             mask_tensor = torch.from_numpy(mask)
     
-        if self.noise_injector_model is not None:
-            from utils import adaptive_quantum_noise_injection
-            with torch.no_grad():
-                img_on_gpu_with_batch = image_tensor.to(self.device).unsqueeze(0)
-                noise_map = self.noise_injector_model(img_on_gpu_with_batch)
-                image_tensor_with_noise_gpu = adaptive_quantum_noise_injection(
-                    img_on_gpu_with_batch,
-                    noise_map
-                )
-                image_tensor = image_tensor_with_noise_gpu.squeeze(0).cpu()
-                
         return image_tensor, mask_tensor.long()
-    
-    def _load_volume_on_demand(self, vol_idx):
-        """Load and resize volume on-the-fly for lazy loading"""
-        if self.patient_paths is None:
-            raise ValueError("Patient paths not initialized for lazy loading")
-        
-        patient_path = self.patient_paths[vol_idx]
-        patient_id = os.path.basename(patient_path)
-        
-        t1_path = os.path.join(patient_path, f'{patient_id}_t1.nii.gz')
-        t1ce_path = os.path.join(patient_path, f'{patient_id}_t1ce.nii.gz')
-        t2_path = os.path.join(patient_path, f'{patient_id}_t2.nii.gz')
-        flair_path = os.path.join(patient_path, f'{patient_id}_flair.nii.gz')
-        seg_path = os.path.join(patient_path, f'{patient_id}_seg.nii.gz')
-        
-        t1 = nib.load(t1_path).get_fdata()
-        t1ce = nib.load(t1ce_path).get_fdata()
-        t2 = nib.load(t2_path).get_fdata()
-        flair = nib.load(flair_path).get_fdata()
-        volume = np.stack([t1, t1ce, t2, flair], axis=0)
-        
-        mask_data = nib.load(seg_path).get_fdata()
-        mask = np.zeros_like(mask_data, dtype=np.uint8)
-        mask[mask_data == 1] = 1
-        mask[mask_data == 2] = 2
-        mask[mask_data == 4] = 3
-        
-        target_size = (224, 224)  # Use config.IMG_SIZE in production
-        num_slices = volume.shape[3]
-        resized_volume = np.zeros((4, target_size[0], target_size[1], num_slices), dtype=np.float32)
-        resized_mask = np.zeros((target_size[0], target_size[1], num_slices), dtype=np.uint8)
-        
-        for i in range(num_slices):
-            for mod_idx in range(4):
-                resized_volume[mod_idx, :, :, i] = resize(
-                    volume[mod_idx, :, :, i], target_size, order=1, preserve_range=True,
-                    anti_aliasing=True, mode='reflect'
-                )
-            resized_mask[:, :, i] = resize(
-                mask[:, :, i], target_size, order=0, preserve_range=True,
-                anti_aliasing=False, mode='reflect'
-            )
-        
-        for mod_idx in range(4):
-            max_val = np.max(resized_volume[mod_idx])
-            if max_val > 0:
-                resized_volume[mod_idx] /= max_val
-        
-        return resized_volume, resized_mask
 
 
 def load_brats21_volumes(directory, target_size=(224, 224), max_patients=None):

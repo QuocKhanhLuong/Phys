@@ -55,11 +55,14 @@ database/
 data/
 BraTS21/
 BraTS21_preprocessed/
+BraTS21_preprocessed_monai/
+monai_cache/
 *.nii
 *.nii.gz
 *.tar
-
+*.npy
 # B1 maps (generated files)
+brats21_ultimate_common_b1_map.pth
 *b1_map*.pth
 acdc_ultimate_b1_map.pth
 
