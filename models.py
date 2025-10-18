@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from utils import adaptive_smoothing
 
 
 class ConvBlock(nn.Module):
@@ -144,7 +145,6 @@ class EncoderBlock(nn.Module):
         self.noise_estimator = ePURE(in_channels=in_channels)
 
     def forward(self, x):
-        from utils import adaptive_smoothing
         noise_profile = self.noise_estimator(x)
         x_smoothed = adaptive_smoothing(x, noise_profile)
         x = self.conv_block1(x_smoothed)

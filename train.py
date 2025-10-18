@@ -157,24 +157,23 @@ if __name__ == "__main__":
             patient_ids=train_ids,
             num_slices_25d=NUM_SLICES,
             samples_per_patient=samples_per_patient,
-            transforms=train_transform  # Apply augmentation for training
+            transforms=train_transform
         )
         val_dataset = build_monai_persistent_dataset(
             npy_dir=monai_npy_dir,
             patient_ids=val_ids,
             num_slices_25d=NUM_SLICES,
             samples_per_patient=samples_per_patient,
-            transforms=val_test_transform  # No augmentation, only ToTensorV2
+            transforms=val_test_transform
         )
         test_dataset = build_monai_persistent_dataset(
             npy_dir=monai_npy_dir,
             patient_ids=test_ids,
             num_slices_25d=NUM_SLICES,
             samples_per_patient=samples_per_patient,
-            transforms=val_test_transform  # No augmentation, only ToTensorV2
+            transforms=val_test_transform
         )
 
-        # Create cache-aware samplers for better locality
         train_sampler = CacheLocalitySampler(train_dataset, BATCH_SIZE, shuffle=True)
         val_sampler = CacheLocalitySampler(val_dataset, BATCH_SIZE, shuffle=False)
         test_sampler = CacheLocalitySampler(test_dataset, BATCH_SIZE, shuffle=False)
@@ -183,7 +182,6 @@ if __name__ == "__main__":
         PREFETCH_FACTOR = getattr(config, 'DATA_PREFETCH_FACTOR', 2)
         print(f"Using {NUM_WORKERS} workers, prefetch_factor={PREFETCH_FACTOR} (optimized for mmap)")
         
-        # Use sampler instead of shuffle
         train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True if NUM_WORKERS > 0 else False, prefetch_factor=PREFETCH_FACTOR if NUM_WORKERS > 0 else None, worker_init_fn=_worker_init)
         val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True if NUM_WORKERS > 0 else False, prefetch_factor=PREFETCH_FACTOR if NUM_WORKERS > 0 else None)
         test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, sampler=test_sampler, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True if NUM_WORKERS > 0 else False, prefetch_factor=PREFETCH_FACTOR if NUM_WORKERS > 0 else None)
@@ -201,14 +199,13 @@ if __name__ == "__main__":
         print("USING OPTIMIZED PIPELINE (BraTS21Dataset25D + LRU Cache + Memmap)")
         print("=" * 60)
         
-        # Optimized dataset with LRU cache and memmap
         train_dataset = BraTS21Dataset25D(
             npy_dir=npy_dir,
             patient_ids=train_ids,
             num_input_slices=NUM_SLICES,
             transforms=train_transform,
-            max_cache_size=15,  # Cache up to 15 volumes
-            use_memmap=True     # Use memory-mapped files
+            max_cache_size=15,
+            use_memmap=True
         )
         val_dataset = BraTS21Dataset25D(
             npy_dir=npy_dir,
@@ -268,6 +265,7 @@ if __name__ == "__main__":
 
     dataset_name = "brats21"
     b1_map_path = f"{dataset_name}_ultimate_common_b1_map.pth"
+    brats_raw_dir = os.path.join(config.PROJECT_ROOT, 'BraTS21')
     
     if os.path.exists(b1_map_path):
         print(f"\nB1 map found at {b1_map_path}, loading...")
@@ -282,7 +280,6 @@ if __name__ == "__main__":
     else:
         print(f"\nB1 map not found, calculating from scratch...")
         print("Loading subset of volumes for B1 map calculation...")
-        brats_raw_dir = os.path.join(config.PROJECT_ROOT, 'BraTS21')
         subset_volumes, _ = load_brats21_volumes(brats_raw_dir, target_size=(IMG_SIZE, IMG_SIZE), max_patients=200)
         
         for i in range(len(subset_volumes)):
@@ -330,12 +327,6 @@ if __name__ == "__main__":
     epochs_no_improve = 0
     total_train_start = time.time()
 
-    data_load_times = []
-    gpu_transfer_times = []
-    forward_times = []
-    backward_times = []
-    total_iter_times = []
-    
     for epoch in range(NUM_EPOCHS):
         epoch_start_time = time.time()
         print(f"\n--- Epoch {epoch + 1}/{NUM_EPOCHS} ---")
@@ -343,10 +334,15 @@ if __name__ == "__main__":
         model.train()
         epoch_train_loss = 0.0
         
-        train_pbar = tqdm(train_dataloader, desc=f"Training", ncols=100)
-        iter_start = time.time()
+        data_load_times = []
+        gpu_transfer_times = []
+        forward_times = []
+        backward_times = []
+        total_iter_times = []
         
+        train_pbar = tqdm(train_dataloader, desc=f"Training", ncols=100)
         try:
+            iter_start = time.time()
             for batch_idx, (images, targets) in enumerate(train_pbar):
                 data_load_time = time.time() - iter_start
                 data_load_times.append(data_load_time)
@@ -356,7 +352,6 @@ if __name__ == "__main__":
                 gpu_transfer_time = time.time() - transfer_start
                 gpu_transfer_times.append(gpu_transfer_time)
                 
-                # ePURE noise injection
                 if ePURE_augmenter is not None:
                     from utils import adaptive_quantum_noise_injection
                     with torch.no_grad():
@@ -368,8 +363,8 @@ if __name__ == "__main__":
                 forward_start = time.time()
                 b1_map_for_loss = common_b1_map.expand(images.size(0), -1, -1, -1)
                 logits_list, all_eps_sigma_tuples = model(images)
-
-                total_loss = 0
+                
+                loss_components = []
                 for logits in logits_list:
                     if logits.shape[2:] != targets.shape[1:]:
                         resized_targets = F.interpolate(
@@ -381,14 +376,19 @@ if __name__ == "__main__":
                         resized_targets = targets
                     
                     loss_component = criterion(logits, resized_targets, b1_map_for_loss, all_eps_sigma_tuples)
-                    total_loss += loss_component
+                    loss_components.append(loss_component)
                 
-                loss = total_loss / len(logits_list)
+                if loss_components:
+                    loss = torch.stack(loss_components).mean()
+                else:
+                    loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
+
                 forward_time = time.time() - forward_start
                 forward_times.append(forward_time)
                 
                 backward_start = time.time()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 backward_time = time.time() - backward_start
                 backward_times.append(backward_time)
@@ -398,7 +398,6 @@ if __name__ == "__main__":
                 total_iter_time = time.time() - iter_start
                 total_iter_times.append(total_iter_time)
                 
-                # Print loss weights every 100 iterations for monitoring
                 if batch_idx % 100 == 0 and batch_idx > 0:
                     weights = criterion.get_current_loss_weights()
                     print(f"\n   [Iter {batch_idx}] Loss: {loss.item():.6f}")
@@ -424,24 +423,32 @@ if __name__ == "__main__":
                 else:
                     train_pbar.set_postfix({'loss': f'{loss.item():.6f}'})
                 
-                # Explicit memory cleanup (avoid empty_cache per iteration - too slow!)
-                del images, targets, logits_list, all_eps_sigma_tuples, loss, total_loss
-                # Note: torch.cuda.empty_cache() moved to end of epoch only
+                if 'resized_targets' in locals() and resized_targets is not targets:
+                    del resized_targets
+                if 'b1_map_for_loss' in locals():
+                    del b1_map_for_loss
+                del images, targets, logits_list, all_eps_sigma_tuples, loss, loss_components
                 
                 iter_start = time.time()
         finally:
             train_pbar.close()
             
+            # Profiling summary được in sau khi vòng lặp kết thúc
             if len(data_load_times) > 0:
                 print(f"\n   Profiling Summary (last 100 iters):")
-                print(f"   - Data Loading:    {np.mean(data_load_times[-100:]):.3f}s ({np.mean(data_load_times[-100:])/np.mean(total_iter_times[-100:])*100:.1f}%)")
-                print(f"   - GPU Transfer:    {np.mean(gpu_transfer_times[-100:]):.3f}s ({np.mean(gpu_transfer_times[-100:])/np.mean(total_iter_times[-100:])*100:.1f}%)")
-                print(f"   - Forward Pass:    {np.mean(forward_times[-100:]):.3f}s ({np.mean(forward_times[-100:])/np.mean(total_iter_times[-100:])*100:.1f}%)")
-                print(f"   - Backward Pass:   {np.mean(backward_times[-100:]):.3f}s ({np.mean(backward_times[-100:])/np.mean(total_iter_times[-100:])*100:.1f}%)")
-                print(f"   - Total/Iteration: {np.mean(total_iter_times[-100:]):.3f}s")
-                print(f"   - Estimated epoch time: {np.mean(total_iter_times[-100:]) * len(train_dataloader) / 3600:.2f} hours")
+                # Tính toán an toàn, tránh lỗi chia cho 0
+                last_100_total = total_iter_times[-100:]
+                mean_total_iter_time = np.mean(last_100_total) if last_100_total else 1.0
+                
+                print(f"   - Data Loading:    {np.mean(data_load_times[-100:]):.3f}s ({np.mean(data_load_times[-100:]) / mean_total_iter_time * 100:.1f}%)")
+                print(f"   - GPU Transfer:    {np.mean(gpu_transfer_times[-100:]):.3f}s ({np.mean(gpu_transfer_times[-100:]) / mean_total_iter_time * 100:.1f}%)")
+                print(f"   - Forward Pass:    {np.mean(forward_times[-100:]):.3f}s ({np.mean(forward_times[-100:]) / mean_total_iter_time * 100:.1f}%)")
+                print(f"   - Backward Pass:   {np.mean(backward_times[-100:]):.3f}s ({np.mean(backward_times[-100:]) / mean_total_iter_time * 100:.1f}%)")
+                print(f"   - Total/Iteration: {mean_total_iter_time:.3f}s")
+                if len(train_dataloader) > 0:
+                    print(f"   - Estimated epoch time: {mean_total_iter_time * len(train_dataloader) / 3600:.2f} hours")
             
-        avg_train_loss = epoch_train_loss / len(train_dataloader)
+        avg_train_loss = epoch_train_loss / len(train_dataloader) if len(train_dataloader) > 0 else 0.0
         epoch_time = time.time() - epoch_start_time
         print(f"   Training Loss: {avg_train_loss:.4f} | Time: {epoch_time:.2f}s")
 
@@ -449,37 +456,14 @@ if __name__ == "__main__":
             print("   Evaluating on validation set...")
             val_metrics = evaluate_metrics(model, val_dataloader, DEVICE, NUM_CLASSES)
             
-            val_accuracy = val_metrics['accuracy']
-            all_dice = val_metrics['dice_scores']
-            all_iou = val_metrics['iou']
-            all_precision = val_metrics['precision']
-            all_recall = val_metrics['recall']
-            all_f1 = val_metrics['f1_score']
+            avg_fg_dice = np.mean(val_metrics['dice_scores'][1:])
             
-            avg_fg_dice = np.mean(all_dice[1:])
-            avg_fg_iou = np.mean(all_iou[1:])
-            avg_fg_precision = np.mean(all_precision[1:])
-            avg_fg_recall = np.mean(all_recall[1:])
-            avg_fg_f1 = np.mean(all_f1[1:])
-            
-            current_lr = optimizer.param_groups[0]['lr']
-
             print("   --- Per-Class Metrics ---")
             for c_idx in range(NUM_CLASSES):
-                print(f"=> Class {c_idx:<3}: Dice: {all_dice[c_idx]:.4f}, IoU: {all_iou[c_idx]:.4f}, "
-                      f"Precision: {all_precision[c_idx]:.4f}, Recall: {all_recall[c_idx]:.4f}, F1: {all_f1[c_idx]:.4f}")
-
-            print("   --- BraTS Regions (Benchmark Metrics) ---")
-            print(f"=> ET (Enhancing Tumor): {val_metrics['ET']:.4f}")
-            print(f"=> TC (Tumor Core):      {val_metrics['TC']:.4f}")
-            print(f"=> WT (Whole Tumor):     {val_metrics['WT']:.4f}")
-            print(f"=> Average (ET+TC+WT):   {val_metrics['avg_regions']:.4f}")
+                print(f"=> Class {c_idx:<3}: Dice: {val_metrics['dice_scores'][c_idx]:.4f}, IoU: {val_metrics['iou'][c_idx]:.4f}, "
+                      f"Precision: {val_metrics['precision'][c_idx]:.4f}, Recall: {val_metrics['recall'][c_idx]:.4f}, F1: {val_metrics['f1_score'][c_idx]:.4f}")
             
-            print("   --- Summary Metrics ---")
-            print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f}, IoU: {avg_fg_iou:.4f}, "
-                  f"Precision: {avg_fg_precision:.4f}, Recall: {avg_fg_recall:.4f}, F1: {avg_fg_f1:.4f}")
-            print(f"=> Overall Accuracy: {val_accuracy:.4f} | Current LR: {current_lr:.6f}")
-            print(f"=> Epoch Time: {epoch_time:.2f}s")
+            print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f} ...")
 
             scheduler.step(avg_fg_dice)
             if avg_fg_dice > best_val_metric:
@@ -496,17 +480,9 @@ if __name__ == "__main__":
             print(f"\nEarly stopping triggered after {EARLY_STOP_PATIENCE} epochs with no improvement.")
             break
         
-        # Garbage collection at end of epoch
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        
-        # Clear profiling lists to prevent memory buildup
-        data_load_times.clear()
-        gpu_transfer_times.clear()
-        forward_times.clear()
-        backward_times.clear()
-        total_iter_times.clear()
 
     total_train_time = time.time() - total_train_start
     hours = int(total_train_time // 3600)
@@ -542,4 +518,3 @@ if __name__ == "__main__":
         device=DEVICE,
         num_slices=NUM_SLICES * 4
     )
-
