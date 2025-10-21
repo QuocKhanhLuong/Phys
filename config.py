@@ -17,7 +17,9 @@ BRATS_RAW_DIR = os.path.join(PROJECT_ROOT, 'BraTS21')
 
 NUM_EPOCHS = 250
 NUM_CLASSES = 4
-LEARNING_RATE = 3e-4  
+# Learning rate adjusted for large dataset (BraTS21: ~80k slices vs ACDC: ~1.2k)
+# Using LR scaling: LR_large = LR_base / sqrt(size_ratio)
+LEARNING_RATE = 5e-5  # Reduced from 3e-4 for BraTS21
 IMG_SIZE = 224
 BATCH_SIZE = 32
 NUM_SLICES = 5  

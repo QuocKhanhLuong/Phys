@@ -1,6 +1,3 @@
-#!/bin/bash
-# Script to run MONAI pipeline: preprocessing + training
-
 set -e
 
 echo "============================================================"

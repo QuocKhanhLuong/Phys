@@ -315,7 +315,8 @@ if __name__ == "__main__":
     
     criterion = CombinedLoss(
         num_classes=NUM_CLASSES,
-        initial_loss_weights=[0.4, 0.4, 0.2]
+        use_physics=True,  # Enable physics loss
+        fixed_weights=True  # Use fixed weights [0.4, 0.4, 0.2]
     ).to(DEVICE)
     
     optimizer = torch.optim.AdamW(chain(model.parameters(), criterion.parameters()), lr=LEARNING_RATE)
@@ -366,15 +367,13 @@ if __name__ == "__main__":
                 
                 loss_components = []
                 for logits in logits_list:
+                    resized_targets = targets
                     if logits.shape[2:] != targets.shape[1:]:
                         resized_targets = F.interpolate(
-                            targets.unsqueeze(1).float(), 
-                            size=logits.shape[2:], 
+                            targets.unsqueeze(1).float(),
+                            size=logits.shape[2:],
                             mode='nearest'
                         ).squeeze(1).long()
-                    else:
-                        resized_targets = targets
-                    
                     loss_component = criterion(logits, resized_targets, b1_map_for_loss, all_eps_sigma_tuples)
                     loss_components.append(loss_component)
                 
@@ -398,12 +397,8 @@ if __name__ == "__main__":
                 total_iter_time = time.time() - iter_start
                 total_iter_times.append(total_iter_time)
                 
-                if batch_idx % 100 == 0 and batch_idx > 0:
-                    weights = criterion.get_current_loss_weights()
-                    print(f"\n   [Iter {batch_idx}] Loss: {loss.item():.6f}")
-                    print(f"   Loss weights: FL={weights['weight_FocalLoss']:.4f}, "
-                          f"FTL={weights['weight_FocalTverskyLoss']:.4f}, "
-                          f"Phy={weights['weight_Physics']:.4f}")
+                # Removed: Loss weights printing per 100 iterations
+                # Now printing at end of each epoch instead
                 
                 if batch_idx % 50 == 0 and batch_idx > 0:
                     avg_data = np.mean(data_load_times[-50:])
@@ -450,9 +445,16 @@ if __name__ == "__main__":
             
         avg_train_loss = epoch_train_loss / len(train_dataloader) if len(train_dataloader) > 0 else 0.0
         epoch_time = time.time() - epoch_start_time
+        
+        # Print loss weights at end of epoch
+        weights = criterion.get_current_loss_weights()
+        print(f"\n   === Epoch {epoch+1} Summary ===")
         print(f"   Training Loss: {avg_train_loss:.4f} | Time: {epoch_time:.2f}s")
+        print(f"   Loss Weights: FL={weights['weight_FocalLoss']:.4f}, "
+              f"FTL={weights['weight_FocalTverskyLoss']:.4f}, "
+              f"Phy={weights['weight_Physics']:.4f}")
 
-        if val_dataloader.dataset and len(val_dataloader.dataset) > 0:
+        if len(val_dataloader) > 0:
             print("   Evaluating on validation set...")
             val_metrics = evaluate_metrics(model, val_dataloader, DEVICE, NUM_CLASSES)
             

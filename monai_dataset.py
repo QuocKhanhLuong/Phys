@@ -5,24 +5,37 @@ from typing import List, Optional
 from torch.utils.data import Dataset, Sampler
 import json
 import random
+import config
+
+# MONAI imports for 3D augmentation
+from monai.transforms.compose import Compose
+from monai.transforms.spatial.dictionary import RandFlipd, RandAffined
+from monai.transforms.intensity.dictionary import (
+    RandScaleIntensityd, RandShiftIntensityd, RandGaussianNoised,
+    RandGibbsNoised, RandBiasFieldd, NormalizeIntensityd
+)
+from monai.transforms.croppad.dictionary import RandCropByPosNegLabeld
+from monai.transforms.utility.dictionary import Lambdad
 
 
 class MONAI25DDataset(Dataset):
-    """Ultra-optimized MONAI 2.5D dataset with smart batching and zero-copy operations"""
-    
     def __init__(self, npy_dir: str, patient_ids: List[str], num_slices_25d: int, 
                  samples_per_patient: Optional[int] = None, random_seed: int = 42, 
-                 smart_batching: bool = True, transforms=None):
+                 smart_batching: bool = True, transforms=None, use_3d_augmentation: bool = True):
         self.npy_dir = npy_dir
-        self.num_slices = num_slices_25d
-        self.radius = num_slices_25d // 2
+        self.num_slices_25d = num_slices_25d
+        self.radius_25d = num_slices_25d // 2
         self.samples_per_patient = samples_per_patient
         self._mmap_cache = {}  
         self.smart_batching = smart_batching
         self.transforms = transforms
+        self.use_3d_augmentation = use_3d_augmentation
         
         random.seed(random_seed)
         np.random.seed(random_seed)
+        
+        # Define online transforms (3D augmentation + 2.5D cropping)
+        self.online_transforms = self._create_online_transforms()
         
         metadata_path = os.path.join(npy_dir, 'metadata.json')
         with open(metadata_path, 'r') as f:
@@ -40,7 +53,7 @@ class MONAI25DDataset(Dataset):
             
             if pid in patient_slices:
                 num_z = patient_slices[pid]
-                valid_slices = list(range(self.radius, num_z - self.radius))
+                valid_slices = list(range(self.radius_25d, num_z - self.radius_25d))
                 
                 if len(valid_slices) > 0:
                     # If samples_per_patient is None or <= 0, use ALL valid slices
@@ -76,6 +89,51 @@ class MONAI25DDataset(Dataset):
             print(f"  - Sampling mode: Random {samples_per_patient} slices/patient (avg {avg_slices_per_patient:.1f}/patient)")
         print(f"  - Smart batching: {'ENABLED (cache-friendly)' if smart_batching else 'DISABLED'}")
         print(f"  - Memory mapping: ENABLED")
+        print(f"  - 3D Augmentation: {'ENABLED' if use_3d_augmentation else 'DISABLED'}")
+    
+    def _create_online_transforms(self):
+        """Create online transforms for 3D augmentation + 2.5D cropping"""
+        transforms_list = []
+        
+        if self.use_3d_augmentation:
+            # 3D Augmentation transforms
+            transforms_list.extend([
+                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
+                RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
+                RandFlipd(keys=["image", "label"], prob=0.3, spatial_axis=2),
+                RandAffined(
+                    keys=["image", "label"], 
+                    prob=0.5, 
+                    rotate_range=(np.pi/18, np.pi/18, np.pi/18),  # ±10 degrees
+                    scale_range=(0.1, 0.1, 0.1),  # ±10% scaling
+                    translate_range=(10, 10, 5),   # Translation
+                    mode=("bilinear", "nearest"),
+                    padding_mode="zeros"
+                ),
+                RandScaleIntensityd(keys="image", factors=0.1, prob=0.5),
+                RandShiftIntensityd(keys="image", offsets=0.1, prob=0.5),
+                RandGaussianNoised(keys="image", prob=0.3, std=0.01),
+                RandGibbsNoised(keys="image", prob=0.3, alpha=(0.4, 0.8)),
+                RandBiasFieldd(keys="image", prob=0.4, degree=3),
+            ])
+        
+        # 2.5D Cropping
+        transforms_list.append(
+            RandCropByPosNegLabeld(
+                keys=["image", "label"], 
+                label_key="label",
+                spatial_size=(config.IMG_SIZE, config.IMG_SIZE, self.num_slices_25d),
+                num_samples=1  # Only need 1 sample for each __getitem__ call
+            )
+        )
+        
+        # Reshape 2.5D -> 2D
+        transforms_list.extend([
+            Lambdad(keys="image", func=lambda x: x.reshape(-1, x.shape[1], x.shape[2])),
+            Lambdad(keys="label", func=lambda x: x[:, :, :, self.radius_25d]),  # Take center slice
+        ])
+        
+        return Compose(transforms_list)
     
     def __len__(self):
         return len(self.samples)
@@ -89,46 +147,33 @@ class MONAI25DDataset(Dataset):
     def __getitem__(self, idx):
         vol_path, mask_path, center_z = self.samples[idx]
         
-        # Memory-mapped arrays (OS handles caching)
+        # 1. Load 3D volume and mask (memory-mapped)
         volume = self._get_mmap(vol_path)
         mask = self._get_mmap(mask_path)
         
-        # Pre-compute indices (avoid redundant calculations)
-        z_start = max(0, center_z - self.radius)
-        z_end = min(volume.shape[-1], center_z + self.radius + 1)
+        # 2. Prepare data for MONAI transforms
+        data = {"image": volume, "label": mask}
         
-        # Extract slices: (C, H, W, num_slices)
-        image_slices = volume[:, :, :, z_start:z_end]
+        # 3. Apply online transforms (3D augmentation + 2.5D cropping + reshape)
+        try:
+            transformed_data = self.online_transforms(data)
+            image_tensor = transformed_data["image"]
+            label_tensor = transformed_data["label"].long()  
+        except Exception as e:
+            print(f"Error applying online transform for index {idx}: {e}")
+            # Return empty data or skip problematic sample
+            return torch.zeros((config.NUM_SLICES * 4, config.IMG_SIZE, config.IMG_SIZE)), torch.zeros((config.IMG_SIZE, config.IMG_SIZE)).long()
         
-        # Efficient reshape: minimize memory operations
-        # (C, H, W, nz) -> (C, nz, H, W) -> (C*nz, H, W)
-        C, H, W, nz = image_slices.shape
-        
-        # Convert to float32
-        if image_slices.dtype != np.float32:
-            image_slices = image_slices.astype(np.float32)
-        
-        # Transpose and reshape: (C, H, W, nz) -> (C, nz, H, W) -> (C*nz, H, W)
-        image_2d = image_slices.transpose(0, 3, 1, 2).reshape(C * nz, H, W)
-        
-        # Extract label slice
-        label_2d = mask[:, :, center_z]
-        
-        # Apply transforms if provided
-        if self.transforms:
-            # Convert to albumentations format: (C, H, W) -> (H, W, C)
-            image_hwc = image_2d.transpose(1, 2, 0)  # (H, W, C*nz)
+        if self.transforms and not self.use_3d_augmentation:
+            image_np_hwc = image_tensor.numpy().transpose(1, 2, 0)
+            label_np_hw = label_tensor.numpy().squeeze()  # Remove channel dim if exists
             
-            # Apply augmentation
-            augmented = self.transforms(image=image_hwc, mask=label_2d)
-            image_tensor = augmented['image']  # Already a tensor from ToTensorV2
-            label_tensor = augmented['mask']   # Already a tensor
-        else:
-            # No transforms - direct conversion
-            image_tensor = torch.from_numpy(image_2d.copy())
-            label_tensor = torch.from_numpy(label_2d.astype(np.int64).copy())
+            # Apply 2D augmentation
+            augmented = self.transforms(image=image_np_hwc, mask=label_np_hw)
+            image_tensor = augmented['image']  # From ToTensorV2()
+            label_tensor = augmented['mask'].long()  # From ToTensorV2()
         
-        return image_tensor, label_tensor.long()
+        return image_tensor, label_tensor
 
 
 class CacheLocalitySampler(Sampler):
@@ -185,5 +230,38 @@ def build_monai_persistent_dataset(npy_dir: str, patient_ids: List[str], num_sli
                                    cache_dir: str = "./monai_cache",
                                    crop_hw: int = 224,
                                    samples_per_patient: Optional[int] = None,
-                                   transforms=None):
-    return MONAI25DDataset(npy_dir, patient_ids, num_slices_25d, samples_per_patient, transforms=transforms)
+                                   transforms=None, use_3d_augmentation: bool = True):
+    return MONAI25DDataset(npy_dir, patient_ids, num_slices_25d, samples_per_patient, 
+                          transforms=transforms, use_3d_augmentation=use_3d_augmentation)
+
+
+def create_optimized_datasets(npy_dir: str, train_patient_ids: List[str], val_patient_ids: List[str], 
+                             num_slices_25d: int = 5, samples_per_patient: Optional[int] = None):
+    # Training dataset: 3D augmentation only (recommended)
+    train_dataset = MONAI25DDataset(
+        npy_dir=npy_dir,
+        patient_ids=train_patient_ids,
+        num_slices_25d=num_slices_25d,
+        samples_per_patient=samples_per_patient,
+        use_3d_augmentation=True,  # 3D augmentation enabled
+        transforms=None,  # No 2D augmentation to avoid over-augmentation
+        smart_batching=True
+    )
+    
+    # Validation dataset: No augmentation
+    val_dataset = MONAI25DDataset(
+        npy_dir=npy_dir,
+        patient_ids=val_patient_ids,
+        num_slices_25d=num_slices_25d,
+        samples_per_patient=samples_per_patient,
+        use_3d_augmentation=False,  # No 3D augmentation
+        transforms=None,  # No 2D augmentation
+        smart_batching=True
+    )
+    
+    print("✅ Optimized datasets created:")
+    print(f"  - Training: {len(train_dataset)} samples with 3D augmentation")
+    print(f"  - Validation: {len(val_dataset)} samples without augmentation")
+    print("  - Augmentation strategy: 3D-only (recommended)")
+    
+    return train_dataset, val_dataset
