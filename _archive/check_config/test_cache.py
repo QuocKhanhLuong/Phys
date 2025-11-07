@@ -10,6 +10,9 @@ from torch.utils.data import DataLoader
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Import from project
 from monai_dataset import build_monai_persistent_dataset
 from data_utils import get_patient_ids_from_npy

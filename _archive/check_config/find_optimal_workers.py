@@ -3,13 +3,15 @@
 Find optimal number of workers for your system
 """
 import os
+import sys
 import time
 import torch
 import gc
 import numpy as np
 from torch.utils.data import DataLoader
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from monai_dataset import build_monai_persistent_dataset, CacheLocalitySampler, _worker_init
 from data_utils import get_patient_ids_from_npy
@@ -35,18 +37,12 @@ def benchmark_workers(num_workers, num_epochs=2):
     npy_dir = config.MONAI_NPY_DIR
     patient_ids = get_patient_ids_from_npy(npy_dir)[:50]  # Test with 50 patients
     
-    transform = A.Compose([
-        A.Rotate(limit=20, p=0.7),
-        A.HorizontalFlip(p=0.5),
-        ToTensorV2(),
-    ])
-    
+    # Remove the transforms parameter - it's not supported by build_monai_persistent_dataset
     dataset = build_monai_persistent_dataset(
         npy_dir=npy_dir,
         patient_ids=patient_ids,
         num_slices_25d=config.NUM_SLICES,
-        samples_per_patient=10,
-        transforms=transform
+        samples_per_patient=10
     )
     
     sampler = CacheLocalitySampler(dataset, config.BATCH_SIZE, shuffle=True)
@@ -153,22 +149,26 @@ if __name__ == "__main__":
         print(f"{r['num_workers']:<10} {r['avg_time']:>6.2f}s        {r['std_time']:>6.2f}s        {stability}")
     
     # Recommendation
-    # Prioritize: fast AND stable
-    stable_results = [r for r in results if r['std_time'] < 0.5]
-    if stable_results:
-        best = min(stable_results, key=lambda x: x['avg_time'])
-        print("\n" + "="*60)
-        print(f"✅ RECOMMENDED: {best['num_workers']} workers")
-        print(f"   (Fastest stable time: {best['avg_time']:.2f}s ± {best['std_time']:.2f}s)")
+    if results:  # Check if we have any results
+        # Prioritize: fast AND stable
+        stable_results = [r for r in results if r['std_time'] < 0.5]
+        if stable_results:
+            best = min(stable_results, key=lambda x: x['avg_time'])
+            print("\n" + "="*60)
+            print(f"✅ RECOMMENDED: {best['num_workers']} workers")
+            print(f"   (Fastest stable time: {best['avg_time']:.2f}s ± {best['std_time']:.2f}s)")
+        else:
+            best = min(results, key=lambda x: x['avg_time'])
+            print("\n" + "="*60)
+            print(f"⚠️  RECOMMENDED: {best['num_workers']} workers")
+            print(f"   (Fastest but unstable: {best['avg_time']:.2f}s ± {best['std_time']:.2f}s)")
+            print(f"   Warning: All configurations show instability!")
+        
+        print("="*60)
+        
+        print(f"\n💡 Update config.py:")
+        print(f"   DATA_NUM_WORKERS = {best['num_workers']}")
     else:
-        best = min(results, key=lambda x: x['avg_time'])
-        print("\n" + "="*60)
-        print(f"⚠️  RECOMMENDED: {best['num_workers']} workers")
-        print(f"   (Fastest but unstable: {best['avg_time']:.2f}s ± {best['std_time']:.2f}s)")
-        print(f"   Warning: All configurations show instability!")
+        print("\n❌ No successful tests completed. Check your data and configuration.")
     
     print("="*60)
-    
-    print(f"\n💡 Update config.py:")
-    print(f"   DATA_NUM_WORKERS = {best['num_workers']}")
-

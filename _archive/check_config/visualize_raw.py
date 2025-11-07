@@ -4,6 +4,10 @@ import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
 import sys
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import config # Import config để lấy đường dẫn
 
 def visualize_raw_patient(patient_id: str, brats_raw_dir: str):

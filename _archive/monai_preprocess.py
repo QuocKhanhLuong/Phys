@@ -163,9 +163,16 @@ def preprocess_brats21_with_monai_core(
             remapped_seg = np.zeros_like(processed_seg, dtype=np.uint8)
             remapped_seg[processed_seg == 1] = 1
             remapped_seg[processed_seg == 2] = 2
-            remapped_seg[processed_seg == 4] = 3 # Or use original labels if model expects them
+            remapped_seg[processed_seg == 4] = 3 
 
-            # Save preprocessed data as .npy
+            if np.max(remapped_seg) == 0:
+                print(f"Skipping {patient_id}: Mask is empty (all zeros).")
+                continue
+
+            if np.isnan(processed_volume).any():
+                print(f"Skipping {patient_id}: Volume contains NaN values.")
+                continue 
+
             np.save(os.path.join(volumes_dir, f"{patient_id}.npy"), processed_volume.astype(np.float32))
             np.save(os.path.join(masks_dir, f"{patient_id}.npy"), remapped_seg.astype(np.uint8)) # Save remapped label
 

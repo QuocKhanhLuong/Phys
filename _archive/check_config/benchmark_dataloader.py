@@ -4,10 +4,16 @@ Quick benchmark script để test data loading performance
 Chạy: python benchmark_dataloader.py
 """
 
+import os
+import sys
 import torch
 import time
 import numpy as np
 from torch.utils.data import DataLoader
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import config
 from monai_dataset import build_monai_persistent_dataset, CacheLocalitySampler
 from data_utils import get_patient_ids_from_npy

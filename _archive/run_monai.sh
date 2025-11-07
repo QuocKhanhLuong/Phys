@@ -1,8 +1,6 @@
 set -e
 
-echo "============================================================"
 echo "MONAI PIPELINE - Preprocessing + Training"
-echo "============================================================"
 
 BRATS_RAW="/home/linhdang/workspace/minhbao_workspace/Phys/BraTS21"
 MONAI_OUTPUT="/home/linhdang/workspace/minhbao_workspace/Phys/BraTS21_preprocessed_monai"
@@ -18,7 +16,8 @@ if [ -d "$MONAI_OUTPUT" ] && [ -f "$MONAI_OUTPUT/metadata.json" ]; then
         python monai_preprocess.py \
             --input_dir "$BRATS_RAW" \
             --output_dir "$MONAI_OUTPUT" \
-            --spacing 1.0 1.0 1.0
+                --num_viz_samples 20\
+                --target_spacing 1.0 1.0 1.0
     else
         echo "Skipping preprocessing, starting training..."
     fi
@@ -31,14 +30,11 @@ else
     python monai_preprocess.py \
         --input_dir "$BRATS_RAW" \
         --output_dir "$MONAI_OUTPUT" \
-        --spacing 1.0 1.0 1.0
+        --num_viz_samples 20\
+        --target_spacing 1.0 1.0 1.0
 fi
 
-echo ""
-echo "============================================================"
 echo "Training with MONAI Pipeline"
-echo "============================================================"
-echo ""
 
 # Step 2: Start training
 python train.py

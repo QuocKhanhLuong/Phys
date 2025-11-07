@@ -19,74 +19,100 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Virtual Environments
-venv/
-env/
-ENV/
-.venv
+# PyTorch
+*.pth
+*.pt
+checkpoints/
+models/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*.ipynb
 
-# PyCharm
-.idea/
+# IPython
+profile_default/
+ipython_config.py
 
-# VSCode
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+conda-meta/
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# macOS
+# OS
 .DS_Store
-.AppleDouble
-.LSOverride
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Model files (too large for git)
-*.pth
-*.pt
-*.ckpt
-*.h5
-*.hdf5
-*.pkl
-*.pickle
+# Data (keep structure but ignore large files)
+data/*/
+!data/*/README.md
+!data/*/MANDATORY_CITATION.md
 
-# Data files (too large)
-database/
-data/
-BraTS21/
-BraTS21_preprocessed/
-BraTS21_preprocessed_monai/
+# Preprocessed data
+preprocessed_data/*/
+!preprocessed_data/*/README.md
+
+# Results
+results/experiments/*/
+!results/experiments/*/README.md
+results/visualizations/*/
+results/logs/*/
+results/checkpoints/*/
+
+# Cache
+cache/
 monai_cache/
-*.nii
-*.nii.gz
-*.tar
-*.npy
-# B1 maps (generated files)
-brats21_ultimate_common_b1_map.pth
-*b1_map*.pth
-acdc_ultimate_b1_map.pth
-
-# Logs
-logs/
-*.log
+*.cache
 
 # Temporary files
 *.tmp
+*.temp
+temp/
+tmp/
+
+# Logs
+*.log
+logs/
+
+# Large files
+*.nii
+*.nii.gz
+*.npy
+*.h5
+*.hdf5
+
+# Visualization outputs
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.mp4
+*.avi
+
+# Backup files
 *.bak
-*.swp
+*.backup
 *~
 
-# Environment files
-.env
-.envrc
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Other
-*.zip
-*.tar.gz
-*.rar
-
+# System files
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
