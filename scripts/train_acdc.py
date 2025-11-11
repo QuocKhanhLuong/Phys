@@ -26,7 +26,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 from src.models.unet import RobustMedVFL_UNet
 from src.models.epure import ePURE
 from src.modules.losses import CombinedLoss
-from src.data_utils.acdc_dataset_direct import ACDCDataset25D, load_acdc_volumes
+from src.data_utils.acdc_dataset_optimized import (
+    ACDCDataset25DOptimized,
+    get_acdc_volume_ids,
+    split_acdc_by_patient
+)
 from src.utils.helpers import calculate_ultimate_common_b1_map
 
 
@@ -153,50 +157,27 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
 
 
 # =============================================================================
-# DATA LOADING (Exact from Notebook)
+# DATA LOADING (OPTIMIZED with Memmap + LRU Cache)
 # =============================================================================
 
-print("LOADING ACDC DATA")
+print("LOADING ACDC DATA (Optimized)")
 
-# Data paths
-ACDC_ROOT = '/home/linhdang/workspace/minhbao_workspace/Phys/data/ACDC'
-train_data_path = os.path.join(ACDC_ROOT, 'training')
-test_data_path = os.path.join(ACDC_ROOT, 'testing')
+# Preprocessed data paths
+PREPROCESSED_ROOT = '/home/linhdang/workspace/minhbao_workspace/Phys/preprocessed_data/ACDC'
+train_npy_dir = os.path.join(PREPROCESSED_ROOT, 'training')
+test_npy_dir = os.path.join(PREPROCESSED_ROOT, 'testing')
 
-print(f"Loading training volumes from: {train_data_path}")
-all_train_volumes, all_train_masks = load_acdc_volumes(
-    train_data_path, target_size=(IMG_SIZE, IMG_SIZE)
+# Get volume IDs and split by patient (keep ED and ES together)
+print(f"Loading volume IDs from: {train_npy_dir}")
+all_train_volume_ids = get_acdc_volume_ids(train_npy_dir)
+train_volume_ids, val_volume_ids = split_acdc_by_patient(
+    all_train_volume_ids, 
+    val_ratio=0.2, 
+    random_state=42
 )
-print(f"Loaded {len(all_train_volumes)} training volumes.")
 
-print(f"Loading testing volumes from: {test_data_path}")
-all_test_volumes, all_test_masks = load_acdc_volumes(
-    test_data_path, target_size=(IMG_SIZE, IMG_SIZE)
-)
-print(f"Loaded {len(all_test_volumes)} testing volumes.")
-
-# Normalize pixel intensities (0-1 range)
-print("Normalizing pixel intensities...")
-for i in range(len(all_train_volumes)):
-    max_val = np.max(all_train_volumes[i])
-    if max_val > 0:
-        all_train_volumes[i] /= max_val
-
-for i in range(len(all_test_volumes)):
-    max_val = np.max(all_test_volumes[i])
-    if max_val > 0:
-        all_test_volumes[i] /= max_val
-
-# Split train/validation by volumes (patients)
-indices = list(range(len(all_train_volumes)))
-train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=42)
-
-X_train_vols = [all_train_volumes[i] for i in train_indices]
-y_train_vols = [all_train_masks[i] for i in train_indices]
-X_val_vols = [all_train_volumes[i] for i in val_indices]
-y_val_vols = [all_train_masks[i] for i in val_indices]
-
-print(f"Train volumes: {len(X_train_vols)}, Validation volumes: {len(X_val_vols)}")
+print(f"Loading test volume IDs from: {test_npy_dir}")
+test_volume_ids = get_acdc_volume_ids(test_npy_dir)
 
 
 # =============================================================================
@@ -210,28 +191,34 @@ print("INITIALIZING ePURE AUGMENTATION")
 ePURE_augmenter = ePURE(in_channels=NUM_SLICES).to(DEVICE)
 ePURE_augmenter.eval()
 
-# Create datasets
-train_dataset = ACDCDataset25D(
-    volumes_list=X_train_vols,
-    masks_list=y_train_vols,
+# Create optimized datasets (with memmap + LRU cache)
+train_dataset = ACDCDataset25DOptimized(
+    npy_dir=train_npy_dir,
+    volume_ids=train_volume_ids,
     num_input_slices=NUM_SLICES,
     transforms=train_transform,
     noise_injector_model=ePURE_augmenter,  # ePURE augmentation inside dataset
-    device=str(DEVICE)
+    device=str(DEVICE),
+    max_cache_size=15,  # LRU cache for 15 volumes
+    use_memmap=True     # Memory-mapped I/O (10x faster!)
 )
 
-val_dataset = ACDCDataset25D(
-    volumes_list=X_val_vols,
-    masks_list=y_val_vols,
+val_dataset = ACDCDataset25DOptimized(
+    npy_dir=train_npy_dir,
+    volume_ids=val_volume_ids,
     num_input_slices=NUM_SLICES,
-    transforms=val_test_transform
+    transforms=val_test_transform,
+    max_cache_size=10,
+    use_memmap=True
 )
 
-test_dataset = ACDCDataset25D(
-    volumes_list=all_test_volumes,
-    masks_list=all_test_masks,
+test_dataset = ACDCDataset25DOptimized(
+    npy_dir=test_npy_dir,
+    volume_ids=test_volume_ids,
     num_input_slices=NUM_SLICES,
-    transforms=val_test_transform
+    transforms=val_test_transform,
+    max_cache_size=8,
+    use_memmap=True
 )
 
 # Create dataloaders - IMPORTANT: num_workers=0 because ePURE uses GPU in __getitem__
@@ -239,7 +226,7 @@ train_dataloader = DataLoader(
     train_dataset,
     batch_size=BATCH_SIZE,
     shuffle=True,
-    num_workers=0,  # CRITICAL: Must be 0 to avoid CUDA multiprocessing error
+    num_workers=0,  # CRITICAL: Must be 0 to avoid CUDA multiprocessing error with ePURE
     pin_memory=True
 )
 
@@ -263,29 +250,24 @@ print(f"Training slices: {len(train_dataset)}, Validation slices: {len(val_datas
 
 
 # =============================================================================
-# B1 MAP CALCULATION (Exact from Notebook)
+# B1 MAP (Load Pre-computed)
 # =============================================================================
 
-print("CALCULATING B1 MAP")
+print("LOADING B1 MAP")
 
-def convert_volumes_to_tensor(volumes_list):
-    """Convert volume list to tensor for B1 map calculation"""
-    all_slices = []
-    for vol in volumes_list:
-        for i in range(vol.shape[2]):
-            all_slices.append(torch.from_numpy(vol[:, :, i]).unsqueeze(0))
-    return torch.stack(all_slices, dim=0).float()
-
-# Combine all images for common B1 map
-all_images_tensor = convert_volumes_to_tensor(X_train_vols + X_val_vols + all_test_volumes)
-
-# Calculate or load B1 map
+# B1 map was pre-computed and saved, just load it
 dataset_name = "acdc_cardiac"
-common_b1_map = calculate_ultimate_common_b1_map(
-    all_images=all_images_tensor,
-    device=str(DEVICE),
-    save_path=f"{dataset_name}_ultimate_common_b1_map.pth"
-)
+b1_map_path = f"{dataset_name}_ultimate_common_b1_map.pth"
+
+if os.path.exists(b1_map_path):
+    print(f"Loading pre-computed B1 map from: {b1_map_path}")
+    saved_data = torch.load(b1_map_path, map_location=DEVICE)
+    common_b1_map = saved_data['common_b1_map'].to(DEVICE)
+else:
+    raise FileNotFoundError(
+        f"B1 map not found: {b1_map_path}\n"
+        f"This should have been computed during the first training run."
+    )
 
 
 # =============================================================================
@@ -304,8 +286,8 @@ print(f"Model total parameters: {total_params:,}")
 # Initialize loss WITHOUT Anatomical Rule Loss (ABLATION STUDY)
 criterion = CombinedLoss(
     num_classes=NUM_CLASSES,
-    initial_loss_weights=[0.4, 0.4, 0.2],  # FL, FTL, Physics, Anatomical
-    class_indices_for_rules=CLASS_INDICES_FOR_RULES
+    initial_loss_weights=[0.4, 0.4, 0.2],  # FL, FTL, Physics (NO Anatomical)
+    class_indices_for_rules=None  # Not needed for ablation study
 ).to(DEVICE)
 
 # Optimizer includes BOTH model and criterion parameters (for dynamic loss weighting)

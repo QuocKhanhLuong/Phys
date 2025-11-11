@@ -291,7 +291,7 @@ class CombinedLoss(nn.Module):
     def __init__(self, 
                  num_classes=4, 
                  initial_loss_weights: Optional[List[float]] = None,
-                 class_indices_for_rules: Dict[str, int] = None):
+                 class_indices_for_rules: Optional[Dict[str, int]] = None):
         super().__init__()
         
         # --- Initialize loss components ---
