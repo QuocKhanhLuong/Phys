@@ -1,77 +1,139 @@
+"""
+Loss Functions - Exact from Notebook
+From: final-application-maxwell-for-segmentation-task (3).ipynb
+"""
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Optional, List
+from typing import Optional, List, Dict
+
 
 class FocalTverskyLoss(nn.Module):
+    """
+    Hàm mất mát Focal Tversky Loss.
+    Kết hợp Tversky Index để xử lý mất cân bằng class và Focal Loss để tập trung vào các mẫu khó.
+    """
     def __init__(self, 
                  num_classes: int, 
                  alpha: float = 0.3, 
                  beta: float = 0.7, 
                  gamma: float = 4.0 / 3.0, 
-                 epsilon: float = 1e-6,
-                 min_loss: float = 1e-4):
+                 epsilon: float = 1e-6):
+        """
+        Args:
+            num_classes (int): Số lượng class phân vùng (bao gồm cả background).
+            alpha (float): Trọng số cho False Positives (FP).
+            beta (float): Trọng số cho False Negatives (FN).
+            gamma (float): Tham số focal. Giá trị > 1 để tập trung vào mẫu khó.
+            epsilon (float): Hằng số nhỏ để tránh chia cho 0.
+        """
         super().__init__()
         self.num_classes = num_classes
         self.alpha = alpha
         self.beta = beta
         self.gamma = gamma
         self.epsilon = epsilon
-        self.min_loss = min_loss
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits (torch.Tensor): Đầu ra raw từ model, shape (B, C, H, W).
+            targets (torch.Tensor): Ground truth, shape (B, H, W).
+
+        Returns:
+            torch.Tensor: Giá trị loss vô hướng.
+        """
+        # Áp dụng softmax để có xác suất
         probs = F.softmax(logits, dim=1)
+        
+        # Chuyển target sang dạng one-hot
         targets_one_hot = F.one_hot(targets.long(), num_classes=self.num_classes).permute(0, 3, 1, 2).float()
 
         class_losses = []
+        # Bỏ qua background (class 0) vì nó thường chiếm ưu thế và dễ đoán
         for class_idx in range(1, self.num_classes):
             pred_class = probs[:, class_idx, :, :]
             target_class = targets_one_hot[:, class_idx, :, :]
             
+            # Làm phẳng tensor để tính toán
             pred_flat = pred_class.contiguous().view(-1)
             target_flat = target_class.contiguous().view(-1)
 
+            # Tính các thành phần True Positives (TP), False Positives (FP), False Negatives (FN)
             tp = torch.sum(pred_flat * target_flat)
             fp = torch.sum(pred_flat * (1 - target_flat))
             fn = torch.sum((1 - pred_flat) * target_flat)
             
+            # Tính Tversky Index (TI)
             tversky_index = (tp + self.epsilon) / (tp + self.alpha * fp + self.beta * fn + self.epsilon)
+            
+            # Tính Focal Tversky Loss (FTL) cho class hiện tại
+            # **Sử dụng công thức đã được sửa đổi và kiểm chứng: (1 - TI)^γ**
             focal_tversky_loss = torch.pow(1 - tversky_index, self.gamma)
+            
             class_losses.append(focal_tversky_loss)
             
+        # Lấy trung bình loss của các class foreground
         if not class_losses:
-            return torch.tensor(0.0, device=logits.device)
+             return torch.tensor(0.0, device=logits.device) # Tránh lỗi nếu chỉ có 1 class
 
         total_loss = torch.mean(torch.stack(class_losses))
-        return torch.clamp(total_loss, min=self.min_loss)
+        
+        return total_loss
 
 
 class FocalLoss(nn.Module):
+    """
+    Hàm mất mát Focal Loss cho bài toán phân vùng đa lớp.
+    Kế thừa từ https://github.com/Hsuxu/Loss_ToolBox-PyTorch/blob/master/FocalLoss/focal_loss.py
+    """
     def __init__(self,
                  gamma: float = 2.0,
                  alpha: Optional[torch.Tensor] = None,
-                 reduction: str = 'mean',
-                 min_loss: float = 1e-4):
+                 reduction: str = 'mean'):
+        """
+        Args:
+            gamma (float): Tham số focal. Giá trị càng lớn, mô hình càng tập trung vào mẫu khó.
+            alpha (torch.Tensor, optional): Trọng số cho mỗi class, shape (C,).
+            reduction (str, optional): 'mean', 'sum' hoặc 'none'.
+        """
         super().__init__()
         self.gamma = gamma
         self.alpha = alpha
         self.reduction = reduction
-        self.min_loss = min_loss
 
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits (torch.Tensor): Đầu ra raw từ model, shape (B, C, H, W).
+            targets (torch.Tensor): Ground truth, shape (B, H, W).
+
+        Returns:
+            torch.Tensor: Giá trị loss vô hướng.
+        """
+        # Tính CE loss gốc
         ce_loss = F.cross_entropy(logits, targets.long(), reduction='none')
+        
+        # Lấy xác suất của class đúng (p_t)
+        # pt.shape: (B, H, W)
         pt = torch.exp(-ce_loss)
+        
+        # Tính Focal Loss
+        # (1-pt)^gamma * ce_loss
         focal_loss = ((1 - pt) ** self.gamma) * ce_loss
 
         if self.alpha is not None:
             if self.alpha.device != focal_loss.device:
                 self.alpha = self.alpha.to(focal_loss.device)
+            
+            # Lấy alpha tương ứng với từng pixel
             alpha_t = self.alpha.gather(0, targets.view(-1)).view_as(targets)
             focal_loss = alpha_t * focal_loss
 
         if self.reduction == 'mean':
-            return torch.clamp(focal_loss.mean(), min=self.min_loss)
+            return focal_loss.mean()
         elif self.reduction == 'sum':
             return focal_loss.sum()
         else:
@@ -81,65 +143,93 @@ class FocalLoss(nn.Module):
 class PhysicsLoss(nn.Module):
     """
     Physics-informed loss based on Helmholtz equation residual.
-    Improved scaling for better gradient flow.
+    Exact from notebook - simple mean without scaling.
     """
-    def __init__(self, 
-                 scale: float = 0.1,  # Increased from 0.01
-                 normalization_constant: float = 100.0):  # Decreased from 3500.0
+    def __init__(self):
         super().__init__()
-        # Physical constants
-        omega = 2 * np.pi * 42.58e6  # Larmor frequency (Hz)
-        mu_0 = 4 * np.pi * 1e-7      # Permeability of free space
-        eps_0 = 8.854187817e-12      # Permittivity of free space
+        # Định nghĩa hằng số vật lý k0 ở đây
+        omega, mu_0, eps_0 = 2 * np.pi * 42.58e6, 4 * np.pi * 1e-7, 8.854187817e-12
         self.k0 = torch.tensor(omega * np.sqrt(mu_0 * eps_0), dtype=torch.float32)
-        
-        self.scale = scale
-        self.normalization_constant = normalization_constant
 
-    def forward(self, b1, eps_map, sig):
-        from utils import compute_helmholtz_residual
+    def forward(self, b1, eps, sig):
+        from src.utils.helpers import compute_helmholtz_residual
         
-        # Move tensors to correct device
-        eps_map = eps_map.to(b1.device)
+        # Chuyển các tensor lên đúng device của b1
+        eps = eps.to(b1.device)
         sig = sig.to(b1.device)
-        self.k0 = self.k0.to(b1.device)
         
-        # Compute physics residual
-        residual = compute_helmholtz_residual(b1, eps_map, sig, self.k0)
-        loss_raw = torch.mean(residual)
+        # Gọi hàm độc lập
+        residual = compute_helmholtz_residual(b1, eps, sig, self.k0)
+        return torch.mean(residual)
+
+
+class AnatomicalRuleLoss(nn.Module):
+    """
+    Tính toán loss dựa trên quy tắc giải phẫu về vị trí tương đối của các vùng tim.
+    - Phạt khi Tâm thất trái (LV) không được bao quanh bởi Cơ tim (MYO).
+    - Phạt khi Tâm thất phải (RV) nằm cạnh Cơ tim (MYO).
+    """
+    def __init__(self, class_indices: Dict[str, int]):
+        """
+        Args:
+            class_indices (Dict[str, int]): Dictionary ánh xạ tên class sang chỉ số.
+                                          Cần chứa các key: 'LV', 'MYO', 'RV'.
+        """
+        super().__init__()
+        if not all(k in class_indices for k in ['LV', 'MYO', 'RV']):
+            raise ValueError("class_indices must contain keys 'LV', 'MYO', and 'RV'.")
+        self.class_indices = class_indices
+
+    def forward(self, logits: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            logits (torch.Tensor): Đầu ra raw từ model, shape (B, C, H, W).
+
+        Returns:
+            torch.Tensor: Giá trị loss vô hướng.
+        """
+        pred_probs = torch.softmax(logits, dim=1)
         
-        # Improved normalization and scaling
-        normalized_loss = loss_raw / self.normalization_constant
-        scaled_loss = self.scale * normalized_loss
-        
-        # Wider clamp range to prevent gradient vanishing
-        final_loss = torch.clamp(scaled_loss, min=0.001, max=5.0)
-        
-        return final_loss
+        # Lấy bản đồ xác suất cho từng class
+        lv_prob = pred_probs[:, self.class_indices['LV']]
+        myo_prob = pred_probs[:, self.class_indices['MYO']]
+        rv_prob = pred_probs[:, self.class_indices['RV']]
+
+        # Mô phỏng phép giãn nở (dilation) bằng max_pool2d để tìm vùng lân cận
+        dilated_lv_prob = F.max_pool2d(lv_prob.unsqueeze(1), kernel_size=3, stride=1, padding=1).squeeze(1)
+
+        # Phạt 1: Vùng bao quanh LV (dilated_lv_prob) không phải là MYO
+        loss1 = dilated_lv_prob * (1 - myo_prob)
+
+        # Phạt 2: Phạt khi vùng bao quanh LV lại là RV
+        loss2 = dilated_lv_prob * rv_prob
+
+        # Kết hợp và lấy trung bình
+        total_rule_loss = torch.mean(loss1 + loss2)
+        return total_rule_loss
 
 
 class DynamicLossWeighter(nn.Module):
     """
-    Enhanced multi-task weighting with strategies from:
-    - GradNorm (Chen et al., ICML 2018): Balance gradient magnitudes
-    - Kendall et al. (CVPR 2018): Uncertainty-based weighting
-    - Additional entropy regularization to prevent collapse
+    Điều chỉnh trọng số cho nhiều thành phần loss một cách tự động,
+    đảm bảo tổng các trọng số luôn bằng 1 bằng cách sử dụng Softmax.
     """
-    def __init__(self, 
-                 num_losses: int, 
-                 tau: float = 2.5,  # Higher tau = smoother weights (prevent collapse)
-                 initial_weights: Optional[List[float]] = None,
-                 min_loss_value: float = 1e-4,
-                 entropy_reg: float = 0.01,  # Entropy regularization coefficient
-                 min_weight: float = 0.05):  # Minimum weight per loss (prevent zero)
+    def __init__(self, num_losses: int, tau: float = 1.0, initial_weights: Optional[List[float]] = None):
+        """
+        Args:
+            num_losses (int): Số lượng thành phần loss cần cân bằng.
+            tau (float): Hệ số nhiệt độ (temperature) cho hàm softmax.
+                         - tau > 1: làm cho các trọng số "mềm" hơn (gần bằng nhau hơn).
+                         - 0 < tau < 1: làm cho các trọng số "cứng" hơn (chênh lệch nhiều hơn).
+                         - tau = 1: softmax tiêu chuẩn.
+            initial_weights (Optional[List[float]]): Trọng số khởi tạo. Phải có tổng bằng 1.
+                                                     Nếu là None, sẽ khởi tạo đều.
+        """
         super().__init__()
         assert num_losses > 0, "Number of losses must be positive"
         assert tau > 0, "Temperature (tau) must be positive"
         self.num_losses = num_losses
         self.tau = tau
-        self.min_loss_value = min_loss_value
-        self.entropy_reg = entropy_reg
-        self.min_weight = min_weight
 
         if initial_weights:
             assert len(initial_weights) == num_losses, \
@@ -147,42 +237,47 @@ class DynamicLossWeighter(nn.Module):
             initial_weights_tensor = torch.tensor(initial_weights, dtype=torch.float32)
             assert torch.isclose(initial_weights_tensor.sum(), torch.tensor(1.0)), \
                 "Sum of initial weights must be 1"
+            # Khởi tạo tham số logit từ log của trọng số ban đầu
+            # để softmax(params) xấp xỉ initial_weights
             initial_params = torch.log(initial_weights_tensor)
         else:
+            # Khởi tạo bằng 0 sẽ cho ra các trọng số đều nhau sau khi qua softmax
             initial_params = torch.zeros(num_losses, dtype=torch.float32)
 
+        # 'params' là các logit thô mà optimizer sẽ học
         self.params = nn.Parameter(initial_params)
 
     def forward(self, individual_losses: torch.Tensor) -> torch.Tensor:
+        """
+        Tính toán tổng loss đã được cân bằng trọng số.
+
+        Args:
+            individual_losses (torch.Tensor): Một tensor 1D chứa các giá trị loss
+                                              của từng thành phần.
+
+        Returns:
+            torch.Tensor: Giá trị loss tổng hợp (scalar).
+        """
         if not isinstance(individual_losses, torch.Tensor):
             individual_losses = torch.stack(individual_losses)
 
         assert individual_losses.dim() == 1 and individual_losses.size(0) == self.num_losses, \
             f"Input individual_losses must be a 1D tensor of size {self.num_losses}"
 
-        # Stabilize losses to prevent zeros
-        stabilized_losses = torch.clamp(individual_losses, min=self.min_loss_value)
-        
-        # Compute softmax weights with temperature
-        raw_weights = F.softmax(self.params / self.tau, dim=0)
-        
-        # Enforce minimum weight per task (prevent complete collapse)
-        # Strategy from multi-task learning papers to keep all tasks active
-        weights = torch.clamp(raw_weights, min=self.min_weight)
-        weights = weights / weights.sum()  # Re-normalize
-        
-        # Entropy regularization: encourage balanced weights
-        # Higher entropy = more uniform distribution
-        if self.training and self.entropy_reg > 0:
-            entropy = -torch.sum(weights * torch.log(weights + 1e-8))
-            entropy_loss = -self.entropy_reg * entropy  # Negative = maximize entropy
-        else:
-            entropy_loss = 0.0
-        
-        total_loss = torch.sum(weights * stabilized_losses) + entropy_loss
+        # 1. Tính toán các trọng số bằng cách áp dụng softmax lên các tham số có thể học
+        weights = F.softmax(self.params / self.tau, dim=0)
+
+        # 2. Tính loss tổng hợp bằng cách nhân các loss thành phần với trọng số tương ứng
+        # Đây là phép nhân element-wise và sau đó tính tổng (dot product)
+        total_loss = torch.sum(weights * individual_losses)
+
         return total_loss
 
-    def get_current_weights(self):
+    def get_current_weights(self) -> Dict[str, float]:
+        """
+        Lấy các giá trị trọng số hiện tại để theo dõi.
+        Các trọng số này có tổng bằng 1.
+        """
         with torch.no_grad():
             weights = F.softmax(self.params / self.tau, dim=0)
             return {f"weight_{i}": w.item() for i, w in enumerate(weights)}
@@ -190,122 +285,72 @@ class DynamicLossWeighter(nn.Module):
 
 class CombinedLoss(nn.Module):
     """
-    Multi-objective loss combining segmentation + physics constraints.
-    Implements strategies from BraTS literature:
-    - Myronenko (BraTS 2018): Scale physics << segmentation
-    - Zhu et al. (MIDL 2023): Normalize physics by running stats
-    - GradNorm + entropy reg: Prevent weight collapse
+    Combined loss được cập nhật để sử dụng Focal Loss thay cho CE Loss.
+    Exact from notebook.
     """
     def __init__(self, 
                  num_classes=4, 
                  initial_loss_weights: Optional[List[float]] = None,
-                 loss_temperature: float = 3.0,  # Higher = more stable
-                 entropy_regularization: float = 0.02,  # Encourage balanced weights
-                 min_weight_per_loss: float = 0.15,  # Each loss gets ≥15%
-                 use_physics: bool = False,  # ← FLAG to disable physics
-                 fixed_weights: bool = True):  # ← NEW: Use fixed weights instead of dynamic
+                 class_indices_for_rules: Dict[str, int] = None):
         super().__init__()
         
-        self.fl = FocalLoss(gamma=2.0)
-        self.ftl = FocalTverskyLoss(num_classes=num_classes, alpha=0.2, beta=0.8, gamma=4.0/3.0)
-        self.use_physics = use_physics
-        self.fixed_weights = fixed_weights
+        # --- Initialize loss components ---
         
-        if use_physics:
-            self.pl = PhysicsLoss(scale=0.1, normalization_constant=100.0)  # Use improved scaling
-            if fixed_weights:
-                # Fixed weights: [FocalLoss, FocalTverskyLoss, PhysicsLoss] = [0.4, 0.4, 0.2]
-                self.weights = torch.tensor([0.4, 0.4, 0.2], dtype=torch.float32)
-                self.loss_weighter = None
-            else:
-                num_losses = 3
-                if initial_loss_weights is None:
-                    initial_loss_weights = [0.45, 0.45, 0.10]
-                self.loss_weighter = DynamicLossWeighter(
-                    num_losses=num_losses,
-                    tau=loss_temperature,
-                    initial_weights=initial_loss_weights,
-                    entropy_reg=entropy_regularization,
-                    min_weight=min_weight_per_loss
-                )
-        else:
-            self.pl = None
-            if fixed_weights:
-                # Fixed weights: [FocalLoss, FocalTverskyLoss] = [0.5, 0.5]
-                self.weights = torch.tensor([0.5, 0.5], dtype=torch.float32)
-                self.loss_weighter = None
-            else:
-                num_losses = 2  # Only FL + FTL
-                if initial_loss_weights is None:
-                    initial_loss_weights = [0.5, 0.5]
-                self.loss_weighter = DynamicLossWeighter(
-                    num_losses=num_losses,
-                    tau=loss_temperature,
-                    initial_weights=initial_loss_weights,
-                    entropy_reg=entropy_regularization,
-                    min_weight=min_weight_per_loss
-                )
+        # 1. FOCAL LOSS
+        self.fl = FocalLoss(gamma=2.0)
+        print("Initialized with Focal Loss (gamma=2.0).")
+        
+        # 2. FOCAL TVERSKY LOSS - Exact values from notebook
+        self.ftl = FocalTverskyLoss(
+            num_classes=num_classes, 
+            alpha=0.2,      # ← From notebook!
+            beta=0.8,       # ← From notebook!
+            gamma=4.0/3.0
+        )
+        print("Initialized with Focal Tversky Loss (alpha=0.2, beta=0.8, gamma=4/3).")
+
+        # 3. Physics Loss
+        self.pl = PhysicsLoss()
+        
+        # 4. Anatomical Rule Loss - ABLATION: DISABLED
+        # if class_indices_for_rules is None:
+        #     raise ValueError("`class_indices_for_rules` must be provided.")
+        # self.arl = AnatomicalRuleLoss(class_indices=class_indices_for_rules)
+        self.arl = None  # ABLATION STUDY: No Anatomical Loss
+        print("⚠️  ABLATION STUDY: Anatomical Loss DISABLED")
+        
+        # Khởi tạo bộ cân bằng trọng số cho 3 thành phần (was 4)
+        self.loss_weighter = DynamicLossWeighter(num_losses=3, initial_weights=initial_loss_weights)
 
     def forward(self, logits, targets, b1=None, all_es=None):
-        l_fl = self.fl(logits, targets)
-        l_ftl = self.ftl(logits, targets)
+        # --- Calculate individual loss components ---
+        l_fl = self.fl(logits, targets)  # Tính Focal Loss
+        l_ftl = self.ftl(logits, targets)  # Tính Focal Tversky Loss
 
-        if self.use_physics:
-            lphy = torch.tensor(0.0, device=logits.device)
-            if self.pl is not None and b1 is not None and all_es:
-                try:
-                    e1, s1 = all_es[0]
-                    lphy = self.pl(b1, e1, s1)
-                except (IndexError, TypeError):
-                    pass
-            
-            if self.fixed_weights:
-                # Fixed weighting: [FocalLoss, FocalTverskyLoss, PhysicsLoss] = [0.4, 0.4, 0.2]
-                total_loss = (self.weights[0] * l_fl + 
-                            self.weights[1] * l_ftl + 
-                            self.weights[2] * lphy)
-            else:
-                # Dynamic weighting
-                individual_losses = torch.stack([l_fl, l_ftl, lphy])
-                total_loss = self.loss_weighter(individual_losses)
-        else:
-            if self.fixed_weights:
-                # Fixed weighting: [FocalLoss, FocalTverskyLoss] = [0.5, 0.5]
-                total_loss = self.weights[0] * l_fl + self.weights[1] * l_ftl
-            else:
-                # Dynamic weighting
-                individual_losses = torch.stack([l_fl, l_ftl])
-                total_loss = self.loss_weighter(individual_losses)
+        lphy = torch.tensor(0.0, device=logits.device)
+        if self.pl is not None and b1 is not None and all_es:
+            try:
+                e1, s1 = all_es[0]
+                lphy = self.pl(b1, e1, s1)
+            except (IndexError, TypeError):
+                print("Warning: Physics loss skipped due to unexpected `all_es` format.")
         
+        # ABLATION: No Anatomical Loss
+        # larl = self.arl(logits) if self.arl else torch.tensor(0.0, device=logits.device)
+
+        # --- Kết hợp 3 thành phần loss (was 4) ---
+        individual_losses = torch.stack([l_fl, l_ftl, lphy])
+        total_loss = self.loss_weighter(individual_losses)
+
         return total_loss
 
-    def get_current_loss_weights(self):
-        if self.fixed_weights:
-            if self.use_physics:
-                return {
-                    "weight_FocalLoss": self.weights[0].item(),
-                    "weight_FocalTverskyLoss": self.weights[1].item(),
-                    "weight_Physics": self.weights[2].item()
-                }
-            else:
-                return {
-                    "weight_FocalLoss": self.weights[0].item(),
-                    "weight_FocalTverskyLoss": self.weights[1].item(),
-                    "weight_Physics": 0.0
-                }
-        else:
-            # Dynamic weighting
-            weights = self.loss_weighter.get_current_weights()
-            if self.use_physics:
-                return {
-                    "weight_FocalLoss": weights["weight_0"],
-                    "weight_FocalTverskyLoss": weights["weight_1"],
-                    "weight_Physics": weights["weight_2"]
-                }
-            else:
-                return {
-                    "weight_FocalLoss": weights["weight_0"],
-                    "weight_FocalTverskyLoss": weights["weight_1"],
-                    "weight_Physics": 0.0
-                }
-
+    def get_current_loss_weights(self) -> Dict[str, float]:
+        """Helper để theo dõi trọng số giữa các hàm loss."""
+        weights = self.loss_weighter.get_current_weights()
+        # Cập nhật tên cho rõ ràng (3 components for ablation study)
+        return {
+            "weight_FocalLoss": weights["weight_0"],
+            "weight_FocalTverskyLoss": weights["weight_1"],
+            "weight_Physics": weights["weight_2"]
+            # "weight_Anatomical": weights["weight_3"]  # ABLATION: REMOVED
+        }

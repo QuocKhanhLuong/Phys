@@ -233,7 +233,7 @@ def run_and_print_test_evaluation(test_dataloader, device, num_classes, num_slic
         print("\nTest dataset not available or empty.")
 
 
-def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples, device, num_slices):
+def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples, device, num_slices, model_path="best_model.pth"):
     if not volumes_np:
         print("No test data for visualization.")
         return
@@ -242,7 +242,6 @@ def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples,
     from src.models.unet_archetype import RobustMedVFL_UNet
     
     model = RobustMedVFL_UNet(n_channels=num_slices, n_classes=num_classes)
-    model_path = "best_model.pth"
     
     if os.path.exists(model_path):
         print(f"Loading model from '{model_path}'...")

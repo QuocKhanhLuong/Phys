@@ -171,14 +171,14 @@ def load_brats21_volumes(directory, target_size=(224, 224), max_patients=None):
 
         try:
             if all(os.path.exists(p) for p in [t1_path, t1ce_path, t2_path, flair_path]):
-                t1 = nib.load(t1_path).get_fdata()
-                t1ce = nib.load(t1ce_path).get_fdata()
-                t2 = nib.load(t2_path).get_fdata()
-                flair = nib.load(flair_path).get_fdata()
+                t1 = nib.nifti1.load(t1_path).get_fdata()
+                t1ce = nib.nifti1.load(t1ce_path).get_fdata()
+                t2 = nib.nifti1.load(t2_path).get_fdata()
+                flair = nib.nifti1.load(flair_path).get_fdata()
                 volume = np.stack([t1, t1ce, t2, flair], axis=0)
                 
                 if os.path.exists(seg_path):
-                    mask_data = nib.load(seg_path).get_fdata()
+                    mask_data = nib.nifti1.load(seg_path).get_fdata()
                     mask = np.zeros_like(mask_data, dtype=np.uint8)
                     mask[mask_data == 1] = 1
                     mask[mask_data == 2] = 2
@@ -208,7 +208,7 @@ def load_brats21_volumes(directory, target_size=(224, 224), max_patients=None):
                 print(f"Loaded {patient_id}")
                     
             elif os.path.exists(file_4d):
-                data_4d = nib.load(file_4d).get_fdata()
+                data_4d = nib.nifti1.load(file_4d).get_fdata()
                 gt_files = sorted(glob.glob(os.path.join(patient_path, f'{patient_id}_frame*_gt.nii')))
                 
                 if not gt_files:
@@ -228,7 +228,7 @@ def load_brats21_volumes(directory, target_size=(224, 224), max_patients=None):
                     frame_volume = data_4d[:, :, :, frame_idx]
                     volume = np.stack([frame_volume] * 4, axis=0)
                     
-                    gt_data = nib.load(gt_file).get_fdata()
+                    gt_data = nib.nifti1.load(gt_file).get_fdata()
                     mask = gt_data.astype(np.uint8)
                     
                     num_slices = volume.shape[3]
@@ -311,11 +311,11 @@ def preprocess_single_patient(patient_path, target_size=(224, 224)):
         return None, None, patient_id
     
     try:
-        t1 = nib.load(t1_path).get_fdata()
-        t1ce = nib.load(t1ce_path).get_fdata()
-        t2 = nib.load(t2_path).get_fdata()
-        flair = nib.load(flair_path).get_fdata()
-        mask = nib.load(seg_path).get_fdata().astype(np.uint8)
+        t1 = nib.nifti1.load(t1_path).get_fdata()
+        t1ce = nib.nifti1.load(t1ce_path).get_fdata()
+        t2 = nib.nifti1.load(t2_path).get_fdata()
+        flair = nib.nifti1.load(flair_path).get_fdata()
+        mask = nib.nifti1.load(seg_path).get_fdata().astype(np.uint8)
         
         t1 = normalize_volume_simple(t1)
         t1ce = normalize_volume_simple(t1ce)
