@@ -213,3 +213,13 @@ EARLY_STOP_PATIENCE = TRAINING_CONFIG["early_stopping_patience"]
 # Legacy class mappings
 BRATS_CLASS_MAP = BRATS21_CONFIG["class_map"]
 BRATS_REGION_NAMES = BRATS21_CONFIG["region_names"]
+
+# Mở file src/config.py của bạn và thêm dòng này:
+
+# Preprocessed data directories
+PREPROCESSED_DIR = PROJECT_ROOT / "preprocessed_data"
+BRATS21_PREPROCESSED_DIR = PREPROCESSED_DIR / "brats21" / "BraTS21_preprocessed_monai"
+ACDC_PREPROCESSED_DIR = PREPROCESSED_DIR / "acdc"
+ATLAS_RAW_DIR = DATA_DIR / "ATLAS"
+# --- THÊM DÒNG NÀY ---
+ATLAS_PREPROCESSED_DIR = PREPROCESSED_DIR / "atlas_npy"

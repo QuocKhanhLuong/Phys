@@ -103,7 +103,7 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
         eval_pbar = tqdm(dataloader, desc="Evaluating", leave=False, ncols=80)
         for imgs, tgts in eval_pbar:
             imgs, tgts = imgs.to(device), tgts.to(device)
-            if imgs.size(0) == 0:
+            if imgs.size(0) == 0: 
                 continue
             
             # Model returns list of logits (deep supervision)
@@ -129,11 +129,11 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
                 fn[c] += (tc_f.sum() - inter).item()
 
     metrics = {
-        'accuracy': 0.0,
-        'dice_scores': [],
-        'iou': [],
-        'precision': [],
-        'recall': [],
+        'accuracy': 0.0, 
+        'dice_scores': [], 
+        'iou': [], 
+        'precision': [], 
+        'recall': [], 
         'f1_score': []
     }
 
@@ -167,14 +167,17 @@ PREPROCESSED_ROOT = '/home/linhdang/workspace/minhbao_workspace/Phys/preprocesse
 train_npy_dir = os.path.join(PREPROCESSED_ROOT, 'training')
 test_npy_dir = os.path.join(PREPROCESSED_ROOT, 'testing')
 
-# Get volume IDs and split by patient (keep ED and ES together)
+# Get volume IDs and split (SAME as original - by volume index for exact reproduction)
 print(f"Loading volume IDs from: {train_npy_dir}")
 all_train_volume_ids = get_acdc_volume_ids(train_npy_dir)
-train_volume_ids, val_volume_ids = split_acdc_by_patient(
-    all_train_volume_ids, 
-    val_ratio=0.2, 
-    random_state=42
-)
+
+# Split by volume index (same as original code) - NOT by patient
+indices = list(range(len(all_train_volume_ids)))
+train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=42)
+train_volume_ids = [all_train_volume_ids[i] for i in train_indices]
+val_volume_ids = [all_train_volume_ids[i] for i in val_indices]
+
+print(f"Split: {len(train_volume_ids)} train volumes, {len(val_volume_ids)} val volumes")
 
 print(f"Loading test volume IDs from: {test_npy_dir}")
 test_volume_ids = get_acdc_volume_ids(test_npy_dir)
@@ -195,7 +198,7 @@ ePURE_augmenter.eval()
 train_dataset = ACDCDataset25DOptimized(
     npy_dir=train_npy_dir,
     volume_ids=train_volume_ids,
-    num_input_slices=NUM_SLICES,
+    num_input_slices=NUM_SLICES, 
     transforms=train_transform,
     noise_injector_model=ePURE_augmenter,  # ePURE augmentation inside dataset
     device=str(DEVICE),
@@ -206,7 +209,7 @@ train_dataset = ACDCDataset25DOptimized(
 val_dataset = ACDCDataset25DOptimized(
     npy_dir=train_npy_dir,
     volume_ids=val_volume_ids,
-    num_input_slices=NUM_SLICES,
+    num_input_slices=NUM_SLICES, 
     transforms=val_test_transform,
     max_cache_size=10,
     use_memmap=True
@@ -215,7 +218,7 @@ val_dataset = ACDCDataset25DOptimized(
 test_dataset = ACDCDataset25DOptimized(
     npy_dir=test_npy_dir,
     volume_ids=test_volume_ids,
-    num_input_slices=NUM_SLICES,
+    num_input_slices=NUM_SLICES, 
     transforms=val_test_transform,
     max_cache_size=8,
     use_memmap=True
@@ -223,25 +226,25 @@ test_dataset = ACDCDataset25DOptimized(
 
 # Create dataloaders - IMPORTANT: num_workers=0 because ePURE uses GPU in __getitem__
 train_dataloader = DataLoader(
-    train_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=True,
+    train_dataset, 
+    batch_size=BATCH_SIZE, 
+    shuffle=True, 
     num_workers=0,  # CRITICAL: Must be 0 to avoid CUDA multiprocessing error with ePURE
     pin_memory=True
 )
 
 val_dataloader = DataLoader(
-    val_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=False,
+    val_dataset, 
+    batch_size=BATCH_SIZE, 
+    shuffle=False, 
     num_workers=0,
     pin_memory=True
 )
 
 test_dataloader = DataLoader(
-    test_dataset,
-    batch_size=BATCH_SIZE,
-    shuffle=False,
+    test_dataset, 
+    batch_size=BATCH_SIZE, 
+    shuffle=False, 
     num_workers=0,
     pin_memory=True
 )
@@ -250,24 +253,40 @@ print(f"Training slices: {len(train_dataset)}, Validation slices: {len(val_datas
 
 
 # =============================================================================
-# B1 MAP (Load Pre-computed)
+# B1 MAP CALCULATION (Recalculate with correct split)
 # =============================================================================
 
-print("LOADING B1 MAP")
+print("CALCULATING B1 MAP")
 
-# B1 map was pre-computed and saved, just load it
+def convert_npy_to_tensor_for_b1(npy_dir, volume_ids):
+    """Load .npy volumes and convert to tensor for B1 map calculation"""
+    volumes_dir = os.path.join(npy_dir, 'volumes')
+    all_slices = []
+    
+    for vid in volume_ids:
+        vol_path = os.path.join(volumes_dir, f'{vid}.npy')
+        vol = np.load(vol_path)  # Shape: (H, W, Z)
+        
+        for i in range(vol.shape[2]):
+            all_slices.append(torch.from_numpy(vol[:, :, i]).unsqueeze(0))
+    
+    return torch.stack(all_slices, dim=0).float()
+
+# Combine all images from train/val/test splits
+print("Converting volumes to tensor for B1 map...")
+train_val_tensor = convert_npy_to_tensor_for_b1(train_npy_dir, train_volume_ids + val_volume_ids)
+test_tensor = convert_npy_to_tensor_for_b1(test_npy_dir, test_volume_ids)
+all_images_tensor = torch.cat([train_val_tensor, test_tensor], dim=0)
+
+print(f"Total slices for B1 map: {all_images_tensor.shape[0]}")
+
+# Calculate or load B1 map
 dataset_name = "acdc_cardiac"
-b1_map_path = f"{dataset_name}_ultimate_common_b1_map.pth"
-
-if os.path.exists(b1_map_path):
-    print(f"Loading pre-computed B1 map from: {b1_map_path}")
-    saved_data = torch.load(b1_map_path, map_location=DEVICE)
-    common_b1_map = saved_data['common_b1_map'].to(DEVICE)
-else:
-    raise FileNotFoundError(
-        f"B1 map not found: {b1_map_path}\n"
-        f"This should have been computed during the first training run."
-    )
+common_b1_map = calculate_ultimate_common_b1_map(
+    all_images=all_images_tensor,
+    device=str(DEVICE),
+    save_path=f"{dataset_name}_ultimate_common_b1_map.pth"
+)
 
 
 # =============================================================================
@@ -286,13 +305,13 @@ print(f"Model total parameters: {total_params:,}")
 # Initialize loss WITHOUT Anatomical Rule Loss (ABLATION STUDY)
 criterion = CombinedLoss(
     num_classes=NUM_CLASSES,
-    initial_loss_weights=[0.4, 0.4, 0.2],  # FL, FTL, Physics (NO Anatomical)
-    class_indices_for_rules=None  # Not needed for ablation study
+    initial_loss_weights=[0.4, 0.4, 0.2],  
+    class_indices_for_rules=None  
 ).to(DEVICE)
 
 # Optimizer includes BOTH model and criterion parameters (for dynamic loss weighting)
 optimizer = torch.optim.AdamW(
-    chain(model.parameters(), criterion.parameters()),
+    chain(model.parameters(), criterion.parameters()), 
     lr=LEARNING_RATE
 )
 
@@ -344,8 +363,8 @@ for epoch in range(NUM_EPOCHS):
             # Handle size mismatch (resize targets if needed)
             if logits.shape[2:] != targets.shape[1:]:
                 resized_targets = F.interpolate(
-                    targets.unsqueeze(1).float(),
-                    size=logits.shape[2:],
+                    targets.unsqueeze(1).float(), 
+                    size=logits.shape[2:], 
                     mode='nearest'
                 ).squeeze(1).long()
             else:

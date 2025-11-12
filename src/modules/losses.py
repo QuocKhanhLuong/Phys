@@ -150,7 +150,7 @@ class PhysicsLoss(nn.Module):
         # Định nghĩa hằng số vật lý k0 ở đây
         omega, mu_0, eps_0 = 2 * np.pi * 42.58e6, 4 * np.pi * 1e-7, 8.854187817e-12
         self.k0 = torch.tensor(omega * np.sqrt(mu_0 * eps_0), dtype=torch.float32)
-
+        
     def forward(self, b1, eps, sig):
         from src.utils.helpers import compute_helmholtz_residual
         
@@ -266,7 +266,7 @@ class DynamicLossWeighter(nn.Module):
 
         # 1. Tính toán các trọng số bằng cách áp dụng softmax lên các tham số có thể học
         weights = F.softmax(self.params / self.tau, dim=0)
-
+        
         # 2. Tính loss tổng hợp bằng cách nhân các loss thành phần với trọng số tương ứng
         # Đây là phép nhân element-wise và sau đó tính tổng (dot product)
         total_loss = torch.sum(weights * individual_losses)
@@ -337,11 +337,11 @@ class CombinedLoss(nn.Module):
         
         # ABLATION: No Anatomical Loss
         # larl = self.arl(logits) if self.arl else torch.tensor(0.0, device=logits.device)
-
+        
         # --- Kết hợp 3 thành phần loss (was 4) ---
         individual_losses = torch.stack([l_fl, l_ftl, lphy])
         total_loss = self.loss_weighter(individual_losses)
-
+        
         return total_loss
 
     def get_current_loss_weights(self) -> Dict[str, float]:

@@ -51,7 +51,7 @@ def decrypt_data():
         # Lấy mật khẩu từ environment variable hoặc người dùng
         password = os.environ.get('ATLAS_PASSWORD')
         if not password:
-            password = getpass.getpass("Nhập mật khẩu giải mã ATLAS: ")
+        password = getpass.getpass("Nhập mật khẩu giải mã ATLAS: ")
         else:
             print("Sử dụng mật khẩu từ ATLAS_PASSWORD environment variable.")
         

@@ -16,7 +16,6 @@ from pathlib import Path
 from tqdm import tqdm
 import json
 from skimage.transform import resize
-import cv2
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -82,20 +81,28 @@ def preprocess_single_patient_acdc(patient_path, target_size=(224, 224)):
             
             num_slices = img_data.shape[2]
             
-            # Resize all slices using cv2 (faster than skimage)
+            # Resize all slices using skimage (EXACT same as working code)
             resized_img = np.zeros((target_size[0], target_size[1], num_slices), dtype=np.float32)
             resized_mask = np.zeros((target_size[0], target_size[1], num_slices), dtype=np.uint8)
             
             for i in range(num_slices):
-                resized_img[:, :, i] = cv2.resize(
-                    img_data[:, :, i].astype(np.float32),
-                    target_size,
-                    interpolation=cv2.INTER_LINEAR
+                # Image: order=1 (bilinear), preserve_range=True, anti_aliasing=True
+                resized_img[:, :, i] = resize(
+                    img_data[:, :, i], 
+                    target_size, 
+                    order=1, 
+                    preserve_range=True,
+                    anti_aliasing=True, 
+                    mode='reflect'
                 )
-                resized_mask[:, :, i] = cv2.resize(
-                    mask_data[:, :, i].astype(np.uint8),
-                    target_size,
-                    interpolation=cv2.INTER_NEAREST
+                # Mask: order=0 (nearest), preserve_range=True, anti_aliasing=False
+                resized_mask[:, :, i] = resize(
+                    mask_data[:, :, i], 
+                    target_size, 
+                    order=0, 
+                    preserve_range=True,
+                    anti_aliasing=False, 
+                    mode='reflect'
                 )
             
             # Normalize volume
