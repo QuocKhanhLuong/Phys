@@ -143,24 +143,21 @@ class FocalLoss(nn.Module):
 class PhysicsLoss(nn.Module):
     """
     Physics-informed loss based on Helmholtz equation residual.
-    Exact from notebook - simple mean without scaling.
     """
-    def __init__(self):
+    def __init__(self, scale_factor=0.01):
         super().__init__()
-        # Định nghĩa hằng số vật lý k0 ở đây
         omega, mu_0, eps_0 = 2 * np.pi * 42.58e6, 4 * np.pi * 1e-7, 8.854187817e-12
         self.k0 = torch.tensor(omega * np.sqrt(mu_0 * eps_0), dtype=torch.float32)
+        self.scale_factor = scale_factor
         
     def forward(self, b1, eps, sig):
         from src.utils.helpers import compute_helmholtz_residual
         
-        # Chuyển các tensor lên đúng device của b1
         eps = eps.to(b1.device)
         sig = sig.to(b1.device)
         
-        # Gọi hàm độc lập
         residual = compute_helmholtz_residual(b1, eps, sig, self.k0)
-        return torch.mean(residual)
+        return torch.mean(residual) * self.scale_factor
 
 
 class AnatomicalRuleLoss(nn.Module):
@@ -310,7 +307,7 @@ class CombinedLoss(nn.Module):
         print("Initialized with Focal Tversky Loss (alpha=0.2, beta=0.8, gamma=4/3).")
 
         # 3. Physics Loss
-        self.pl = PhysicsLoss()
+        self.pl = PhysicsLoss(scale_factor=0.01)
         
         # 4. Anatomical Rule Loss - ABLATION: DISABLED
         # if class_indices_for_rules is None:

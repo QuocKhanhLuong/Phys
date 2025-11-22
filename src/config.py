@@ -62,7 +62,7 @@ DATA_CONFIG = {
     "pin_memory": True,
     "persistent_workers": True,
     "image_size": 224,
-    "num_slices": 5,
+    "num_slices": 9,
     "augmentation_prob": 0.5
 }
 

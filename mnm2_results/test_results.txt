@@ -1,0 +1,52 @@
+============================================================
+M&Ms2 TEST SET RESULTS
+============================================================
+
+Model: mnm2_results/best_model_mnm2.pth
+Test samples: 108 slices
+
+Mean of ALL 4 Classes:
+  Accuracy: 0.9783
+  Dice: 0.8204
+  IoU: 0.7182
+  Precision: 0.7906
+  Recall: 0.8594
+  F1-score: 0.8217
+
+Per-Class Metrics:
+  BG:
+    Dice: 0.9920
+    IoU: 0.9841
+    Precision: 0.9960
+    Recall: 0.9876
+    F1: 0.9918
+
+  LV:
+    Dice: 0.8484
+    IoU: 0.7410
+    Precision: 0.8622
+    Recall: 0.8697
+    F1: 0.8659
+
+  MYO:
+    Dice: 0.6395
+    IoU: 0.4755
+    Precision: 0.5841
+    Recall: 0.6954
+    F1: 0.6349
+
+  RV:
+    Dice: 0.8018
+    IoU: 0.6721
+    Precision: 0.7202
+    Recall: 0.8848
+    F1: 0.7940
+
+Foreground Classes Summary:
+  Avg Dice: 0.7633
+  Avg IoU: 0.6296
+  Avg Precision: 0.7222
+  Avg Recall: 0.8166
+  Avg F1: 0.7650
+
+Best Validation Dice: 0.6706

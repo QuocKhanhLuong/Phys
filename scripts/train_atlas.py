@@ -22,10 +22,13 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # --- THAY ĐỔI: Imports ---
-from src.models.unet import RobustMedVFL_UNet
+# (Giả định bạn đã có các model này trong src/models/)
+from src.models.unet import RobustMedVFL_UNet 
 from src.models.epure import ePURE
-from src.modules.losses import CombinedLoss
-from src.data_utils.atlas_dataset_optimized import (
+# (Import các loss functions)
+from src.modules.losses import CombinedLoss, FocalLoss, FocalTverskyLoss
+# --- THAY ĐỔI: Import file data loader mới cho ATLAS ---
+from src.data_utils.atlas import (
     ATLASDataset25DOptimized,
     get_atlas_volume_ids,
     split_atlas_by_patient
@@ -80,7 +83,7 @@ val_test_transform = A.Compose([
 
 
 # =============================================================================
-# HÀM ĐÁNH GIÁ (Copy từ ACDC và sửa lại)
+# HÀM ĐÁNH GIÁ (Sửa lại cho 2 lớp)
 # =============================================================================
 
 def evaluate_metrics(model, dataloader, device, num_classes=2):
@@ -141,6 +144,7 @@ def evaluate_metrics(model, dataloader, device, num_classes=2):
 print("ĐANG TẢI DỮ LIỆU ATLAS (TỐI ƯU HÓA - NPY)")
 
 # --- THAY ĐỔI: Đường dẫn đến NPY ---
+# Đảm bảo bạn đã cập nhật src/config.py
 train_npy_dir = os.path.join(config.ATLAS_PREPROCESSED_DIR, 'train')
 test_npy_dir = os.path.join(config.ATLAS_PREPROCESSED_DIR, 'test')
 
@@ -157,6 +161,9 @@ print(f"Tải test volume IDs từ: {test_npy_dir}")
 test_volume_ids = get_atlas_volume_ids(test_npy_dir)
 print(f"Tìm thấy {len(test_volume_ids)} test volumes.")
 
+# ATLAS test set không có labels, nên ta sẽ skip test evaluation
+if len(test_volume_ids) == 0:
+    print("CẢNH BÁO: Test set rỗng (không có labels). Sẽ chỉ dùng validation set để đánh giá.")
 
 # =============================================================================
 # EPURE AUGMENTATION (Giữ nguyên)
@@ -166,7 +173,6 @@ print("Khởi tạo ePURE Augmentation")
 ePURE_augmenter = ePURE(in_channels=NUM_SLICES).to(DEVICE)
 ePURE_augmenter.eval()
 
-# --- THAY ĐỔI: Dùng ATLASDataset25DOptimized ---
 train_dataset = ATLASDataset25DOptimized(
     npy_dir=train_npy_dir,
     volume_ids=train_volume_ids,
@@ -187,21 +193,31 @@ val_dataset = ATLASDataset25DOptimized(
     use_memmap=True
 )
 
-test_dataset = ATLASDataset25DOptimized(
-    npy_dir=test_npy_dir,
-    volume_ids=test_volume_ids,
-    num_input_slices=NUM_SLICES,
-    transforms=val_test_transform,
-    max_cache_size=8,
-    use_memmap=True
-)
+# Chỉ tạo test_dataset nếu có test volumes
+if len(test_volume_ids) > 0:
+    test_dataset = ATLASDataset25DOptimized(
+        npy_dir=test_npy_dir,
+        volume_ids=test_volume_ids,
+        num_input_slices=NUM_SLICES,
+        transforms=val_test_transform,
+        max_cache_size=8,
+        use_memmap=True
+    )
+else:
+    test_dataset = None
 
 # --- THAY ĐỔI: num_workers BẮT BUỘC BẰNG 0 ---
+# (Vì ePURE augmentation đang chạy trên GPU bên trong __getitem__)
 train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
 val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
-test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
 
-print(f"Training slices: {len(train_dataset)}, Validation slices: {len(val_dataset)}, Test slices: {len(test_dataset)}")
+if test_dataset is not None:
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
+    print(f"Training slices: {len(train_dataset)}, Validation slices: {len(val_dataset)}, Test slices: {len(test_dataset)}")
+else:
+    test_dataloader = None
+    print(f"Training slices: {len(train_dataset)}, Validation slices: {len(val_dataset)}, Test slices: 0 (không có labels)")
+
 print("CẢNH BÁO: num_workers=0 là bắt buộc do ePURE augmentation (GPU) chạy trong Dataset.")
 
 # =============================================================================
@@ -222,15 +238,14 @@ else:
     # Nếu chưa có, tạo nó
     print(f"Không tìm thấy B1 map, đang tạo file mới...")
     def convert_volumes_to_tensor_for_b1(npy_dir, volume_ids):
+        """Tải các file .npy (chỉ 1 kênh) để tính B1 map"""
         all_slices = []
-        # Lấy mẫu một phần dữ liệu để tính B1 map cho nhanh
         sample_volume_ids = np.random.choice(volume_ids, min(len(volume_ids), 50), replace=False)
         print(f"  Sử dụng {len(sample_volume_ids)} volumes để tính B1 map...")
         for vid in tqdm(sample_volume_ids, desc="  Tải slices cho B1 map"):
             vol_path = os.path.join(npy_dir, 'volumes', f'{vid}.npy')
-            vol_data = np.load(vol_path, mmap_mode='r')
+            vol_data = np.load(vol_path, mmap_mode='r') # Shape (H, W, Z)
             for i in range(vol_data.shape[2]):
-                # Chỉ lấy 1 kênh (kênh 0) để tính B1
                 all_slices.append(torch.from_numpy(vol_data[:, :, i]).unsqueeze(0))
         all_images_tensor = torch.stack(all_slices, dim=0).float()
         return all_images_tensor
@@ -238,8 +253,13 @@ else:
     print("  Đang tải dữ liệu thô để tính B1 map...")
     train_tensors = convert_volumes_to_tensor_for_b1(train_npy_dir, train_volume_ids)
     val_tensors = convert_volumes_to_tensor_for_b1(train_npy_dir, val_volume_ids)
-    test_tensors = convert_volumes_to_tensor_for_b1(test_npy_dir, test_volume_ids)
-    all_images_tensor = torch.cat([train_tensors, val_tensors, test_tensors], dim=0)
+    
+    # Chỉ load test tensors nếu có test volumes
+    if len(test_volume_ids) > 0:
+        test_tensors = convert_volumes_to_tensor_for_b1(test_npy_dir, test_volume_ids)
+        all_images_tensor = torch.cat([train_tensors, val_tensors, test_tensors], dim=0)
+    else:
+        all_images_tensor = torch.cat([train_tensors, val_tensors], dim=0)
     
     print(f"  Tổng cộng {all_images_tensor.shape[0]} slices được dùng để tính B1 map.")
     common_b1_map = calculate_ultimate_common_b1_map(
@@ -261,17 +281,26 @@ model = RobustMedVFL_UNet(n_channels=NUM_SLICES, n_classes=NUM_CLASSES, deep_sup
 total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Model total parameters: {total_params:,}")
 
-# --- THAY ĐỔI: Cấu hình loss cho ATLAS (TẮT Physics, TẮT Anatomical) ---
-# Chúng ta sẽ tự định nghĩa loss trong vòng lặp train để tránh sửa file src/modules/losses.py
-criterion_fl = FocalLoss(gamma=2.0).to(DEVICE)
-criterion_ftl = FocalTverskyLoss(num_classes=NUM_CLASSES, alpha=0.2, beta=0.8, gamma=4.0/3.0).to(DEVICE)
+# --- THAY ĐỔI: Sử dụng CombinedLoss với Dynamic Weighter và cả 3 loss ---
+# Khởi tạo trọng số ban đầu cho 3 loss components
+initial_weights = [0.4, 0.4, 0.2]  # FL: 40%, FTL: 40%, Physics: 20%
 
-print("ĐÃ TẮT PHYSICS LOSS VÀ ANATOMICAL LOSS.")
-print("Sử dụng 50% FocalLoss + 50% FocalTverskyLoss (Fixed).")
+criterion = CombinedLoss(
+    num_classes=NUM_CLASSES,
+    initial_loss_weights=initial_weights,
+    class_indices_for_rules=None  # ATLAS không cần anatomical rules (chỉ có 2 lớp)
+).to(DEVICE)
 
+print("✓ SỬ DỤNG COMBINEDLOSS VỚI DYNAMIC WEIGHTER")
+print(f"  - FocalLoss (gamma=2.0)")
+print(f"  - FocalTverskyLoss (alpha=0.2, beta=0.8, gamma=4/3)")
+print(f"  - PhysicsLoss (Helmholtz với B1 map)")
+print(f"  - Initial weights: FL={initial_weights[0]}, FTL={initial_weights[1]}, Physics={initial_weights[2]}")
+print(f"  - Trọng số sẽ được tự động điều chỉnh qua training")
 
+# Optimizer train cả model và loss weighter
 optimizer = torch.optim.AdamW(
-    model.parameters(), # Chỉ train tham số model
+    list(model.parameters()) + list(criterion.parameters()), 
     lr=LEARNING_RATE
 )
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -307,7 +336,7 @@ for epoch in range(NUM_EPOCHS):
         logits_list, all_eps_sigma_tuples = model(images)
 
         total_loss = torch.tensor(0.0, device=DEVICE, requires_grad=True)
-        for logits in logits_list:
+        for logits, eps_sigma_tuple in zip(logits_list, all_eps_sigma_tuples):
             if logits.shape[2:] != targets.shape[1:]:
                 resized_targets = F.interpolate(
                     targets.unsqueeze(1).float(), size=logits.shape[2:],
@@ -316,22 +345,43 @@ for epoch in range(NUM_EPOCHS):
             else:
                 resized_targets = targets
             
-            # --- THAY ĐỔI: Tính loss thủ công (50/50) ---
-            l_fl = criterion_fl(logits, resized_targets)
-            l_ftl = criterion_ftl(logits, resized_targets)
-            loss_component = (0.5 * l_fl) + (0.5 * l_ftl)
+            # Resize B1 map nếu cần
+            if common_b1_map.shape[-2:] != logits.shape[-2:]:
+                b1_resized = F.interpolate(
+                    common_b1_map.unsqueeze(0).unsqueeze(0),
+                    size=logits.shape[-2:],
+                    mode='bilinear',
+                    align_corners=False
+                ).squeeze(0).squeeze(0)
+            else:
+                b1_resized = common_b1_map
+            
+            # Sử dụng CombinedLoss với FL, FTL, và Physics Loss
+            loss_component = criterion(
+                logits=logits,
+                targets=resized_targets,
+                b1=b1_resized,
+                all_es=[eps_sigma_tuple]
+            )
             
             total_loss = total_loss + loss_component
         
         loss = total_loss / len(logits_list)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Thêm Clip Grad
         optimizer.step()
         epoch_train_loss += loss.item()
         train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
     
     avg_train_loss = epoch_train_loss / len(train_dataloader)
     train_time = time.time() - train_start_time
+    
+    # Lấy và in ra trọng số hiện tại của các loss
+    current_weights = criterion.get_current_loss_weights()
     print(f"Training Loss: {avg_train_loss:.4f} (Time: {train_time:.1f}s)")
+    print(f"  Loss Weights: FL={current_weights['weight_FocalLoss']:.3f}, "
+          f"FTL={current_weights['weight_FocalTverskyLoss']:.3f}, "
+          f"Physics={current_weights['weight_Physics']:.3f}")
 
     # --- Validation Phase (Thay đổi) ---
     if val_dataloader and len(val_dataset) > 0:
@@ -379,36 +429,40 @@ print(f"Model đã lưu tại: {MODEL_SAVE_PATH}")
 # ĐÁNH GIÁ TRÊN TẬP TEST
 # =============================================================================
 
-print("\nĐANG ĐÁNH GIÁ TRÊN TẬP TEST")
-print("Tải model tốt nhất...")
-try:
-    model.load_state_dict(torch.load(MODEL_SAVE_PATH))
-    model.eval()
-except FileNotFoundError:
-    print(f"LỖI: Không tìm thấy file model '{MODEL_SAVE_PATH}'. Bỏ qua bước test.")
-    sys.exit(1)
-except Exception as e:
-    print(f"LỖI khi tải model: {e}. Bỏ qua bước test.")
-    sys.exit(1)
+if test_dataloader is not None and test_dataset is not None and len(test_dataset) > 0:
+    print("\nĐANG ĐÁNH GIÁ TRÊN TẬP TEST")
+    print("Tải model tốt nhất...")
+    try:
+        model.load_state_dict(torch.load(MODEL_SAVE_PATH))
+        model.eval()
+    except FileNotFoundError:
+        print(f"LỖI: Không tìm thấy file model '{MODEL_SAVE_PATH}'. Bỏ qua bước test.")
+        sys.exit(1)
+    except Exception as e:
+        print(f"LỖI khi tải model: {e}. Bỏ qua bước test.")
+        sys.exit(1)
 
+    print("Bắt đầu đánh giá tập test...")
+    test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, NUM_CLASSES)
 
-print("Bắt đầu đánh giá tập test...")
-test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, NUM_CLASSES)
+    print(f"\n{'='*60}")
+    print("KẾT QUẢ TRÊN TẬP TEST")
+    print(f"{'='*60}")
+    test_accuracy = test_metrics['accuracy']
+    test_all_dice = test_metrics['dice_scores']
+    test_all_iou = test_metrics['iou']
+    test_fg_dice = test_all_dice[1] # Dice cho lớp 1 (Lesion)
 
-print(f"\n{'='*60}")
-print("KẾT QUẢ TRÊN TẬP TEST")
-print(f"{'='*60}")
-test_accuracy = test_metrics['accuracy']
-test_all_dice = test_metrics['dice_scores']
-test_all_iou = test_metrics['iou']
-test_fg_dice = test_all_dice[1] # Dice cho lớp 1 (Lesion)
+    print(f"   --- Per-Class Metrics (Test) ---")
+    print(f"=> {ATLAS_CLASS_MAP[0]:<15}: Dice: {test_all_dice[0]:.4f}, IoU: {test_all_iou[0]:.4f}")
+    print(f"=> {ATLAS_CLASS_MAP[1]:<15}: Dice: {test_all_dice[1]:.4f}, IoU: {test_all_iou[1]:.4f}")
+    print(f"   --- Summary Metrics (Test) ---")
+    print(f"=> Metric chính (Lesion Dice): {test_fg_dice:.4f}")
+    print(f"=> Overall Accuracy: {test_accuracy:.4f}")
+    print(f"{'='*60}")
+else:
+    print("\nBỎ QUA ĐÁNH GIÁ TEST SET (không có labels)")
+    print(f"{'='*60}")
 
-print(f"   --- Per-Class Metrics (Test) ---")
-print(f"=> {ATLAS_CLASS_MAP[0]:<15}: Dice: {test_all_dice[0]:.4f}, IoU: {test_all_iou[0]:.4f}")
-print(f"=> {ATLAS_CLASS_MAP[1]:<15}: Dice: {test_all_dice[1]:.4f}, IoU: {test_all_iou[1]:.4f}")
-print(f"   --- Summary Metrics (Test) ---")
-print(f"=> Metric chính (Lesion Dice): {test_fg_dice:.4f}")
-print(f"=> Overall Accuracy: {test_accuracy:.4f}")
-print(f"{'='*60}")
 print("THÍ NGHIỆM HOÀN TẤT")
 print(f"{'='*60}")

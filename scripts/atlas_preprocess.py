@@ -88,8 +88,9 @@ def process_split(bids_split_dir: Path, output_split_dir: Path, target_size=(224
     
     for sub_dir in tqdm(subject_dirs, desc=f"Processing {bids_split_dir.name}"):
         patient_id = sub_dir.name
-        image_path = sub_dir / "anat" / f"{patient_id}_space-MNI152NLin2009aSym_T1w.nii.gz"
-        mask_path = sub_dir / "anat" / f"{patient_id}_space-MNI152NLin2009aSym_label-L_desc-T1lesion_mask.nii.gz"
+        # ATLAS có thêm ses-1 trong cấu trúc
+        image_path = sub_dir / "ses-1" / "anat" / f"{patient_id}_ses-1_space-MNI152NLin2009aSym_T1w.nii.gz"
+        mask_path = sub_dir / "ses-1" / "anat" / f"{patient_id}_ses-1_space-MNI152NLin2009aSym_label-L_desc-T1lesion_mask.nii.gz"
         
         volume_save_path = volumes_dir / f'{patient_id}.npy'
         mask_save_path = masks_dir / f'{patient_id}.npy'
