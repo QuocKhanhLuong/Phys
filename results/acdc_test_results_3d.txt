@@ -1,0 +1,15 @@
+============================================================
+ACDC TEST SET RESULTS (3D VOLUMETRIC)
+============================================================
+
+Model: weights/best_model_acdc_no_anatomical.pth
+Parameters: 1,597,706
+
+Per-Class 3D Metrics:
+Class                | Dice       | HD95      
+--------------------------------------------------
+Right Ventricle      | 0.9140     | 1.2414
+Myocardium           | 0.8874     | 1.0201
+Left Ventricle       | 0.9442     | 1.0549
+--------------------------------------------------
+Foreground Mean      | 0.9152     | 1.1055

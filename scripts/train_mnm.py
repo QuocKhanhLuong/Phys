@@ -12,6 +12,10 @@ from albumentations.pytorch import ToTensorV2
 from itertools import chain
 import cv2
 from tqdm import tqdm
+from monai.metrics import compute_hausdorff_distance
+import warnings
+
+warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -69,6 +73,9 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
     fn = [0] * num_classes
     dice_s = [0.0] * num_classes
     iou_s = [0.0] * num_classes
+    hd95_s = [0.0] * num_classes
+    hd95_counts = [0] * num_classes
+    
     batches = 0
     total_correct_pixels = 0
     total_pixels = 0
@@ -96,10 +103,36 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
                 fp[c] += (pc_f.sum() - inter).item()
                 fn[c] += (tc_f.sum() - inter).item()
 
+            # --- HD95 Calculation (CPU to avoid VRAM leak) ---
+            # Move to CPU first
+            preds_cpu = preds.detach().cpu()
+            tgts_cpu = tgts.detach().cpu()
+
+            preds_oh = F.one_hot(preds_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
+            tgts_oh = F.one_hot(tgts_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
+            
+            try:
+                hd95_batch = compute_hausdorff_distance(
+                    y_pred=preds_oh, 
+                    y=tgts_oh, 
+                    include_background=True, 
+                    percentile=95.0
+                )
+                
+                for c in range(num_classes):
+                    valid_vals = hd95_batch[:, c]
+                    mask = ~torch.isnan(valid_vals) & ~torch.isinf(valid_vals)
+                    if mask.any():
+                        hd95_s[c] += valid_vals[mask].sum().item()
+                        hd95_counts[c] += mask.sum().item()
+            except Exception:
+                pass
+
     metrics = {
         'accuracy': 0.0, 
         'dice_scores': [], 
         'iou': [], 
+        'hd95': [],
         'precision': [], 
         'recall': [], 
         'f1_score': []
@@ -112,6 +145,12 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
         for c in range(num_classes):
             metrics['dice_scores'].append(dice_s[c] / batches)
             metrics['iou'].append(iou_s[c] / batches)
+            
+            if hd95_counts[c] > 0:
+                metrics['hd95'].append(hd95_s[c] / hd95_counts[c])
+            else:
+                metrics['hd95'].append(float('nan'))
+                
             prec = tp[c] / (tp[c] + fp[c] + 1e-6)
             rec = tp[c] / (tp[c] + fn[c] + 1e-6)
             metrics['precision'].append(prec)
@@ -119,7 +158,7 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
             metrics['f1_score'].append(2 * prec * rec / (prec + rec + 1e-6) if (prec + rec > 0) else 0.0)
     else:
         for _ in range(num_classes):
-            [metrics[key].append(0.0) for key in ['dice_scores', 'iou', 'precision', 'recall', 'f1_score']]
+            [metrics[key].append(0.0) for key in ['dice_scores', 'iou', 'hd95', 'precision', 'recall', 'f1_score']]
             
     return metrics
 
@@ -206,7 +245,7 @@ print(f"Total slices for B1 map: {train_val_tensor.shape[0]}")
 common_b1_map = calculate_ultimate_common_b1_map(
     all_images=train_val_tensor,
     device=str(DEVICE),
-    save_path=f"{dataset_name}_ultimate_common_b1_map.pth"
+    save_path=f"b1_maps/{dataset_name}_ultimate_common_b1_map.pth"
 )
 
 print("Initializing model")
@@ -230,13 +269,17 @@ scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, mode='max', factor=0.5, patience=10
 )
 
-best_model_path = os.path.join(RESULTS_DIR, "best_model_mnm_norm.pth")
+best_model_path_dice = "weights/best_model_mnm_dice.pth"
+best_model_path_hd95 = "weights/best_model_mnm_hd95.pth"
+best_model_path_overall = "weights/best_model_mnm_overall.pth"
 
 print("Model initialized")
 
 print("Starting training")
 
 best_val_dice = 0.0
+best_val_hd95 = float('inf')
+best_val_overall = float('-inf')
 epochs_no_improve = 0
 history = {'train_loss': [], 'val_dice': [], 'val_acc': []}
 
@@ -303,30 +346,47 @@ for epoch in range(NUM_EPOCHS):
     print("Evaluating on validation set")
     val_metrics = evaluate_metrics(model, val_loader, DEVICE, NUM_CLASSES)
     
+    # Explicitly empty cache after validation
+    torch.cuda.empty_cache()
+    
     val_accuracy = val_metrics['accuracy']
     all_dice = val_metrics['dice_scores']
     all_iou = val_metrics['iou']
+    all_hd95 = val_metrics['hd95']
     all_precision = val_metrics['precision']
     all_recall = val_metrics['recall']
     all_f1 = val_metrics['f1_score']
     
     avg_fg_dice = np.mean(all_dice[1:])
     avg_fg_iou = np.mean(all_iou[1:])
+    
+    fg_hd95_vals = [h for h in all_hd95[1:] if not np.isnan(h)]
+    if len(fg_hd95_vals) > 0:
+        avg_fg_hd95 = np.mean(fg_hd95_vals)
+    else:
+        avg_fg_hd95 = float('inf')
+        
     avg_fg_precision = np.mean(all_precision[1:])
     avg_fg_recall = np.mean(all_recall[1:])
     avg_fg_f1 = np.mean(all_f1[1:])
     
+    # Calculate Overall Score
+    safe_hd95 = avg_fg_hd95 if avg_fg_hd95 != float('inf') else 100.0
+    overall_score = avg_fg_dice + (1.0 / (safe_hd95 + 1.0))
+
     current_lr = optimizer.param_groups[0]['lr']
     
     print(f"   Per-Class Metrics")
     for c_idx in range(NUM_CLASSES):
         class_name = MNM_CLASS_MAP.get(c_idx, f"Class {c_idx}")
-        print(f"=> {class_name:<15}: Dice: {all_dice[c_idx]:.4f}, IoU: {all_iou[c_idx]:.4f}, "
+        hd_str = f"{all_hd95[c_idx]:.4f}" if not np.isnan(all_hd95[c_idx]) else "NaN"
+        print(f"=> {class_name:<15}: Dice: {all_dice[c_idx]:.4f}, IoU: {all_iou[c_idx]:.4f}, HD95: {hd_str}, "
               f"Precision: {all_precision[c_idx]:.4f}, Recall: {all_recall[c_idx]:.4f}, F1: {all_f1[c_idx]:.4f}")
     
     print(f"   Summary Metrics")
-    print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f}, IoU: {avg_fg_iou:.4f}, "
+    print(f"=> Avg Foreground: Dice: {avg_fg_dice:.4f}, IoU: {avg_fg_iou:.4f}, HD95: {avg_fg_hd95:.4f}, "
           f"Precision: {avg_fg_precision:.4f}, Recall: {avg_fg_recall:.4f}, F1: {avg_fg_f1:.4f}")
+    print(f"=> Overall Score: {overall_score:.4f}")
     print(f"=> Overall Accuracy: {val_accuracy:.4f} | Learning Rate: {current_lr:.6f}")
     
     history['train_loss'].append(avg_train_loss)
@@ -335,14 +395,27 @@ for epoch in range(NUM_EPOCHS):
     
     scheduler.step(avg_fg_dice)
     
+    # Save Best Dice
     if avg_fg_dice > best_val_dice:
         best_val_dice = avg_fg_dice
-        torch.save(model.state_dict(), best_model_path)
-        print(f"\nNew best model saved! Avg Foreground Dice: {best_val_dice:.4f}")
+        torch.save(model.state_dict(), best_model_path_dice)
+        print(f"\nNew best model (DICE) saved! Avg Foreground Dice: {best_val_dice:.4f}")
         epochs_no_improve = 0
     else:
         epochs_no_improve += 1
         print(f"No improvement for {epochs_no_improve} epoch(s)")
+
+    # Save Best HD95
+    if avg_fg_hd95 < best_val_hd95:
+        best_val_hd95 = avg_fg_hd95
+        torch.save(model.state_dict(), best_model_path_hd95)
+        print(f"New best model (HD95) saved! Avg Foreground HD95: {best_val_hd95:.4f}")
+
+    # Save Best Overall
+    if overall_score > best_val_overall:
+        best_val_overall = overall_score
+        torch.save(model.state_dict(), best_model_path_overall)
+        print(f"New best model (OVERALL) saved! Score: {best_val_overall:.4f}")
     
     if epochs_no_improve >= EARLY_STOP_PATIENCE:
         print(f"Early stopping triggered after {EARLY_STOP_PATIENCE} epochs with no improvement")
@@ -350,7 +423,9 @@ for epoch in range(NUM_EPOCHS):
 
 print("Training completed")
 print(f"Best validation Dice score: {best_val_dice:.4f}")
-print(f"Model saved as: {best_model_path}")
+print(f"Best validation HD95 score: {best_val_hd95:.4f}")
+print(f"Best validation Overall score: {best_val_overall:.4f}")
+print(f"Model saved as: {best_model_path_dice}")
 
 print(f"\n{'='*60}")
 print("Experiment complete")

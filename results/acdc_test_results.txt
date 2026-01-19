@@ -1,0 +1,23 @@
+============================================================
+ACDC TEST SET RESULTS
+============================================================
+
+Model: ./weights/best_model_acdc_overall.pth
+Parameters: 1,597,706
+
+Per-Class Metrics:
+Class            | Dice    | HD95    | IoU     | Prec    | Rec     | F1     
+---------------------------------------------------------------------------
+Background       | 0.9981  | 1.5494  | 0.9961  | 0.9978  | 0.9983  | 0.9981
+Right Ventricle  | 0.9157  | 3.5497  | 0.8467  | 0.9230  | 0.9209  | 0.9219
+Myocardium       | 0.8829  | 1.8841  | 0.7909  | 0.8917  | 0.8754  | 0.8835
+Left Ventricle   | 0.9543  | 1.6526  | 0.9129  | 0.9643  | 0.9525  | 0.9583
+
+Foreground Classes Summary:
+  Avg Dice: 0.9176
+  Avg HD95: 2.3622
+  Avg IoU: 0.8502
+  Avg Precision: 0.9263
+  Avg Recall: 0.9163
+  Avg F1: 0.9213
+

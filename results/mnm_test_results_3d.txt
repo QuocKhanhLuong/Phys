@@ -1,0 +1,15 @@
+============================================================
+M&Ms TEST SET RESULTS (3D VOLUMETRIC)
+============================================================
+
+Model: weights/best_model_mnm_norm.pth
+Parameters: 1,597,706
+
+Per-Class 3D Metrics:
+Class                | Dice       | HD95      
+--------------------------------------------------
+Left Ventricle       | 0.9017     | 1.3267
+Myocardium           | 0.8239     | 1.2224
+Right Ventricle      | 0.8558     | 1.9589
+--------------------------------------------------
+Foreground Mean      | 0.8604     | 1.5027

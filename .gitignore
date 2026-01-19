@@ -70,11 +70,16 @@ preprocessed_data/*/
 !preprocessed_data/*/README.md
 
 # Results
+comparison/
 results/experiments/*/
 !results/experiments/*/README.md
 results/visualizations/*/
 results/logs/*/
 results/checkpoints/*/
+
+# Ablation study outputs
+ablation/*/weights/
+ablation/*/results/
 
 # Cache
 cache/

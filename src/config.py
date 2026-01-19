@@ -6,30 +6,36 @@ from typing import Dict, Any
 PROJECT_ROOT = Path(__file__).parent.parent
 SRC_ROOT = Path(__file__).parent
 
-# Dataset Configuration
 
-# Raw data directories
+WEIGHTS_DIR = PROJECT_ROOT / "weights"
+B1_MAPS_DIR = PROJECT_ROOT / "b1_maps"
+RESULTS_DIR = PROJECT_ROOT / "results"
+
+# Dataset Configuration
 DATA_DIR = PROJECT_ROOT / "data"
-BRATS21_RAW_DIR = DATA_DIR / "BraTS21"
 ACDC_RAW_DIR = DATA_DIR / "ACDC"
 ATLAS_RAW_DIR = DATA_DIR / "ATLAS"
+MNM_RAW_DIR = DATA_DIR / "MnM"
+SCD_RAW_DIR = DATA_DIR / "SCD"
+EMIDEC_RAW_DIR = DATA_DIR / "EMIDEC"
 
 # Preprocessed data directories
 PREPROCESSED_DIR = PROJECT_ROOT / "preprocessed_data"
-BRATS21_PREPROCESSED_DIR = PREPROCESSED_DIR / "brats21" / "BraTS21_preprocessed_monai"
-ACDC_PREPROCESSED_DIR = PREPROCESSED_DIR / "acdc"
-ATLAS_PREPROCESSED_DIR = PREPROCESSED_DIR / "atlas"
+ACDC_PREPROCESSED_DIR = PREPROCESSED_DIR / "ACDC"
+ATLAS_PREPROCESSED_DIR = PREPROCESSED_DIR / "atlas_npy"
+MNM_PREPROCESSED_DIR = PREPROCESSED_DIR / "mnm"
+SCD_PREPROCESSED_DIR = PREPROCESSED_DIR / "SCD"
+EMIDEC_PREPROCESSED_DIR = PREPROCESSED_DIR / "EMIDEC"
 
 # Cache directories
 CACHE_DIR = PROJECT_ROOT / "cache"
-MONAI_CACHE_DIR = CACHE_DIR / "monai"
 
 # Model Configuration
 
 # Model architecture
 MODEL_CONFIG = {
-    "input_channels": 4,  # BraTS21: T1, T1ce, T2, FLAIR
-    "num_classes": 4,     # Background, NCR/NET, Edema, ET
+    "input_channels": 5,  # 2.5D: 5 slices
+    "num_classes": 4,     # Background + 3 foreground classes
     "base_filters": 64,
     "depth": 4,
     "dropout_rate": 0.1,
@@ -55,14 +61,10 @@ TRAINING_CONFIG = {
 # =============================================================================
 
 DATA_CONFIG = {
-    "use_monai_pipeline": True,
-    "samples_per_patient": None,  # None for all slices
-    "num_workers": 8,
-    "prefetch_factor": 2,
+    "num_workers": 0,  # Must be 0 for ePURE augmentation
     "pin_memory": True,
-    "persistent_workers": True,
     "image_size": 224,
-    "num_slices": 9,
+    "num_slices": 5,
     "augmentation_prob": 0.5
 }
 
@@ -71,9 +73,9 @@ DATA_CONFIG = {
 # =============================================================================
 
 LOSS_CONFIG = {
-    "dice_weight": 1.0,
-    "focal_weight": 0.5,
-    "physics_weight": 0.3,
+    "dice_weight": 0.4,
+    "focal_weight": 0.4,
+    "physics_weight": 0.2,
     "focal_alpha": 0.25,
     "focal_gamma": 2.0,
     "smooth": 1e-6
@@ -83,45 +85,56 @@ LOSS_CONFIG = {
 # Dataset-Specific Configuration
 # =============================================================================
 
-# BraTS21 Configuration
-BRATS21_CONFIG = {
-    "name": "BraTS21",
-    "modalities": ["T1", "T1ce", "T2", "FLAIR"],
-    "class_map": {
-        0: "Background",
-        1: "NCR/NET",  # Necrotic and non-enhancing tumor
-        2: "Edema",    # Peritumoral edema
-        3: "ET"        # Enhancing tumor
-    },
-    "region_names": {
-        "ET": "Enhancing Tumor",
-        "TC": "Tumor Core",  # NCR/NET + ET
-        "WT": "Whole Tumor"  # NCR/NET + ET + Edema
-    },
-    "preprocessing": {
-        "normalization": "z_score",
-        "crop_to_nonzero": True,
-        "resize_to": (224, 224),
-        "slice_thickness": 1.0
-    }
-}
-
-# ACDC Configuration (example)
 ACDC_CONFIG = {
     "name": "ACDC",
-    "modalities": ["ED", "ES"],  # End-diastolic, End-systolic
     "class_map": {
         0: "Background",
         1: "Right Ventricle",
         2: "Myocardium",
         3: "Left Ventricle"
     },
-    "preprocessing": {
-        "normalization": "min_max",
-        "crop_to_nonzero": True,
-        "resize_to": (224, 224),
-        "slice_thickness": 1.0
-    }
+    "num_classes": 4
+}
+
+MNM_CONFIG = {
+    "name": "M&M",
+    "class_map": {
+        0: "Background",
+        1: "Left Ventricle",
+        2: "Myocardium",
+        3: "Right Ventricle"
+    },
+    "num_classes": 4
+}
+
+SCD_CONFIG = {
+    "name": "SCD",
+    "class_map": {
+        0: "Background",
+        1: "Left Ventricle"
+    },
+    "num_classes": 2
+}
+
+EMIDEC_CONFIG = {
+    "name": "EMIDEC",
+    "class_map": {
+        0: "Background",
+        1: "Cavity",
+        2: "Myocardium",
+        3: "Infarction",
+        4: "NoReflow"
+    },
+    "num_classes": 5
+}
+
+ATLAS_CONFIG = {
+    "name": "ATLAS",
+    "class_map": {
+        0: "Background",
+        1: "Lesion"
+    },
+    "num_classes": 2
 }
 
 # =============================================================================
@@ -129,11 +142,11 @@ ACDC_CONFIG = {
 # =============================================================================
 
 EXPERIMENT_CONFIG = {
-    "results_dir": PROJECT_ROOT / "results",
-    "experiments_dir": PROJECT_ROOT / "results" / "experiments",
-    "visualizations_dir": PROJECT_ROOT / "results" / "visualizations",
-    "checkpoint_dir": PROJECT_ROOT / "results" / "checkpoints",
-    "log_dir": PROJECT_ROOT / "results" / "logs"
+    "results_dir": RESULTS_DIR,
+    "weights_dir": WEIGHTS_DIR,
+    "b1_maps_dir": B1_MAPS_DIR,
+    "visualizations_dir": RESULTS_DIR / "visualizations",
+    "log_dir": RESULTS_DIR / "logs"
 }
 
 # =============================================================================
@@ -143,7 +156,7 @@ EXPERIMENT_CONFIG = {
 HARDWARE_CONFIG = {
     "device": "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu",
     "mixed_precision": True,
-    "compile_model": False,  # PyTorch 2.0 compilation
+    "compile_model": False,
     "num_gpus": 1
 }
 
@@ -154,8 +167,11 @@ HARDWARE_CONFIG = {
 def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
     """Get configuration for a specific dataset."""
     config_map = {
-        "brats21": BRATS21_CONFIG,
         "acdc": ACDC_CONFIG,
+        "mnm": MNM_CONFIG,
+        "scd": SCD_CONFIG,
+        "emidec": EMIDEC_CONFIG,
+        "atlas": ATLAS_CONFIG,
     }
     
     if dataset_name.lower() not in config_map:
@@ -165,7 +181,7 @@ def get_dataset_config(dataset_name: str) -> Dict[str, Any]:
 
 def get_experiment_path(experiment_name: str) -> Path:
     """Get the path for a specific experiment."""
-    return EXPERIMENT_CONFIG["experiments_dir"] / experiment_name
+    return EXPERIMENT_CONFIG["results_dir"] / experiment_name
 
 def create_directories():
     """Create all necessary directories."""
@@ -173,11 +189,10 @@ def create_directories():
         DATA_DIR,
         PREPROCESSED_DIR,
         CACHE_DIR,
-        MONAI_CACHE_DIR,
-        EXPERIMENT_CONFIG["results_dir"],
-        EXPERIMENT_CONFIG["experiments_dir"],
+        WEIGHTS_DIR,
+        B1_MAPS_DIR,
+        RESULTS_DIR,
         EXPERIMENT_CONFIG["visualizations_dir"],
-        EXPERIMENT_CONFIG["checkpoint_dir"],
         EXPERIMENT_CONFIG["log_dir"]
     ]
     
@@ -188,20 +203,6 @@ def create_directories():
 # Legacy Support (for backward compatibility)
 # =============================================================================
 
-# Legacy constants for backward compatibility
-PROJECT_ROOT_LEGACY = str(PROJECT_ROOT)
-USE_MONAI_PIPELINE = DATA_CONFIG["use_monai_pipeline"]
-MONAI_SAMPLES_PER_PATIENT = DATA_CONFIG["samples_per_patient"]
-DATA_NUM_WORKERS = DATA_CONFIG["num_workers"]
-DATA_PREFETCH_FACTOR = DATA_CONFIG["prefetch_factor"]
-
-# Legacy paths
-NPY_DIR = str(BRATS21_PREPROCESSED_DIR)
-MONAI_NPY_DIR = str(BRATS21_PREPROCESSED_DIR)
-MONAI_CACHE_DIR_LEGACY = str(MONAI_CACHE_DIR)
-BRATS_RAW_DIR = str(BRATS21_RAW_DIR)
-
-# Legacy training parameters
 NUM_EPOCHS = TRAINING_CONFIG["num_epochs"]
 NUM_CLASSES = MODEL_CONFIG["num_classes"]
 LEARNING_RATE = TRAINING_CONFIG["learning_rate"]
@@ -209,17 +210,3 @@ IMG_SIZE = DATA_CONFIG["image_size"]
 BATCH_SIZE = TRAINING_CONFIG["batch_size"]
 NUM_SLICES = DATA_CONFIG["num_slices"]
 EARLY_STOP_PATIENCE = TRAINING_CONFIG["early_stopping_patience"]
-
-# Legacy class mappings
-BRATS_CLASS_MAP = BRATS21_CONFIG["class_map"]
-BRATS_REGION_NAMES = BRATS21_CONFIG["region_names"]
-
-# Mở file src/config.py của bạn và thêm dòng này:
-
-# Preprocessed data directories
-PREPROCESSED_DIR = PROJECT_ROOT / "preprocessed_data"
-BRATS21_PREPROCESSED_DIR = PREPROCESSED_DIR / "brats21" / "BraTS21_preprocessed_monai"
-ACDC_PREPROCESSED_DIR = PREPROCESSED_DIR / "acdc"
-ATLAS_RAW_DIR = DATA_DIR / "ATLAS"
-# --- THÊM DÒNG NÀY ---
-ATLAS_PREPROCESSED_DIR = PREPROCESSED_DIR / "atlas_npy"

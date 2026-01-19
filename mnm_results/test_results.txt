@@ -1,0 +1,50 @@
+============================================================
+M&Ms TEST SET RESULTS
+============================================================
+
+Model: mnm_results/best_model_mnm.pth
+Test samples: 2154 slices
+
+Mean of ALL 4 Classes:
+  Accuracy: 0.9943
+  Dice: 0.8999
+  IoU: 0.8272
+  Precision: 0.9049
+  Recall: 0.9091
+  F1-score: 0.9061
+
+Per-Class Metrics:
+  Background:
+    Dice: 0.9980
+    IoU: 0.9959
+    Precision: 0.9981
+    Recall: 0.9978
+    F1: 0.9980
+
+  Left Ventricle:
+    Dice: 0.9089
+    IoU: 0.8354
+    Precision: 0.9516
+    Recall: 0.8868
+    F1: 0.9181
+
+  Myocardium:
+    Dice: 0.8256
+    IoU: 0.7049
+    Precision: 0.7867
+    Recall: 0.8746
+    F1: 0.8283
+
+  Right Ventricle:
+    Dice: 0.8670
+    IoU: 0.7726
+    Precision: 0.8831
+    Recall: 0.8771
+    F1: 0.8801
+
+Foreground Classes Summary:
+  Avg Dice: 0.8672
+  Avg IoU: 0.7710
+  Avg Precision: 0.8738
+  Avg Recall: 0.8795
+  Avg F1: 0.8755

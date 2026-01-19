@@ -1,0 +1,21 @@
+============================================================
+SCD TEST SET RESULTS
+============================================================
+
+Model: ./weights/best_model_scd_overall.pth
+Parameters: 1,597,570
+
+Per-Class Metrics:
+Class            | Dice    | HD95    | IoU     | Prec    | Rec     | F1     
+---------------------------------------------------------------------------
+Background       | 0.9982  | 1.4149  | 0.9963  | 0.9988  | 0.9976  | 0.9982
+Left Ventricle   | 0.9322  | 3.1305  | 0.8732  | 0.9133  | 0.9554  | 0.9339
+
+Foreground Classes Summary:
+  Avg Dice: 0.9322
+  Avg HD95: 3.1305
+  Avg IoU: 0.8732
+  Avg Precision: 0.9133
+  Avg Recall: 0.9554
+  Avg F1: 0.9339
+

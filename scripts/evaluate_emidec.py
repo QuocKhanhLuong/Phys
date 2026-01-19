@@ -11,32 +11,27 @@ from tqdm import tqdm
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.models.unet import RobustMedVFL_UNet 
-from src.data_utils.mnm2_dataset_optimized import (
-    MnM2Dataset25DOptimized,
-    get_mnm2_volume_ids,
+from src.data_utils.emidec_dataset_optimized import (
+    EmidecDataset25DOptimized,
+    get_emidec_volume_ids,
 )
 from src import config
 
-NUM_CLASSES = 4
+NUM_CLASSES = 5
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 BATCH_SIZE = 16
 NUM_SLICES = 5
 
-MNM2_CLASS_MAP = {
-    0: 'Background',
-    1: 'Left Ventricle',
-    2: 'Myocardium',
-    3: 'Right Ventricle'
-}
+EMIDEC_CLASS_MAP = {0: 'BG', 1: 'Cavity', 2: 'MYO', 3: 'Infarction', 4: 'NoReflow'}
 
 print(f"Device: {DEVICE}")
-print(f"Evaluating M&Ms2 model on test set")
+print(f"Evaluating EMIDEC model on test set")
 
 test_transform = A.Compose([
     ToTensorV2(),
 ])
 
-def evaluate_metrics(model, dataloader, device, num_classes=4):
+def evaluate_metrics(model, dataloader, device, num_classes=5):
     model.eval()
     tp = [0] * num_classes
     fp = [0] * num_classes
@@ -98,24 +93,24 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
             
     return metrics
 
-print("\nLoading test data M&Ms2")
+print("\nLoading test data EMIDEC")
 
-MNM2_PREPROCESSED_DIR = os.path.join(config.PROJECT_ROOT, "preprocessed_data", "mnm2")
+PREPROCESSED_ROOT = '/home/linhdang/workspace/minhbao_workspace/Phys/preprocessed_data/EMIDEC'
+TEST_NPY_DIR = os.path.join(PREPROCESSED_ROOT, "test")
 
-if not os.path.exists(MNM2_PREPROCESSED_DIR):
-    print(f"Error: Directory not found: {MNM2_PREPROCESSED_DIR}")
+if not os.path.exists(TEST_NPY_DIR):
+    print(f"Error: Directory not found: {TEST_NPY_DIR}")
     sys.exit(1)
 
-all_volume_ids = get_mnm2_volume_ids(MNM2_PREPROCESSED_DIR)
+all_volume_ids = get_emidec_volume_ids(TEST_NPY_DIR)
 print(f"Total volumes: {len(all_volume_ids)}")
 
-test_size = int(len(all_volume_ids) * 0.2)
-test_volume_ids = all_volume_ids[-test_size:]
+test_volume_ids = all_volume_ids
 
 print(f"Using {len(test_volume_ids)} volumes for test set")
 
-test_dataset = MnM2Dataset25DOptimized(
-    npy_dir=MNM2_PREPROCESSED_DIR,
+test_dataset = EmidecDataset25DOptimized(
+    npy_dir=TEST_NPY_DIR,
     volume_ids=test_volume_ids,
     num_input_slices=NUM_SLICES,
     transforms=test_transform,
@@ -137,7 +132,7 @@ print(f"\n{'='*60}")
 print("Evaluating on test set")
 print(f"{'='*60}\n")
 
-MODEL_PATH = "mnm2_results/best_model_mnm2.pth"
+MODEL_PATH = "weights/best_model_emidec.pth"
 
 if not os.path.exists(MODEL_PATH):
     print(f"Error: Model not found: {MODEL_PATH}")
@@ -182,7 +177,7 @@ print(f"    Accuracy: {test_accuracy:.4f}; Dice: {mean_dice_all:.4f}; IoU: {mean
 
 print(f"\n  Per-Class Metrics:")
 for c_idx in range(NUM_CLASSES):
-    class_name = MNM2_CLASS_MAP.get(c_idx, f"Class {c_idx}")
+    class_name = EMIDEC_CLASS_MAP.get(c_idx, f"Class {c_idx}")
     print(f"    => {class_name:<20}: "
           f"Dice: {test_dice[c_idx]:.4f}, "
           f"IoU: {test_iou[c_idx]:.4f}, "
@@ -201,10 +196,11 @@ print(f"\n{'='*60}")
 print("Evaluation complete")
 print(f"{'='*60}")
 
-results_file = "mnm2_results/test_results.txt"
+os.makedirs("results", exist_ok=True)
+results_file = "results/emidec_test_results.txt"
 with open(results_file, 'w') as f:
     f.write("="*60 + "\n")
-    f.write("M&Ms2 TEST SET RESULTS\n")
+    f.write("EMIDEC TEST SET RESULTS\n")
     f.write("="*60 + "\n\n")
     f.write(f"Model: {MODEL_PATH}\n")
     f.write(f"Test samples: {len(test_dataset)} slices\n\n")
@@ -219,7 +215,7 @@ with open(results_file, 'w') as f:
     
     f.write("Per-Class Metrics:\n")
     for c_idx in range(NUM_CLASSES):
-        class_name = MNM2_CLASS_MAP.get(c_idx, f"Class {c_idx}")
+        class_name = EMIDEC_CLASS_MAP.get(c_idx, f"Class {c_idx}")
         f.write(f"  {class_name}:\n")
         f.write(f"    Dice: {test_dice[c_idx]:.4f}\n")
         f.write(f"    IoU: {test_iou[c_idx]:.4f}\n")
