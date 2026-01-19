@@ -74,11 +74,64 @@ val_test_transform = A.Compose([
 
 
 # =============================================================================
+# TEST TIME AUGMENTATION (TTA)
+# =============================================================================
+
+def apply_tta(model, images):
+    """Apply Test Time Augmentation and average predictions.
+    
+    Augmentations:
+    - Original
+    - Horizontal flip
+    - Vertical flip  
+    - 90° rotation
+    - 180° rotation
+    - 270° rotation
+    """
+    model.eval()
+    all_logits = []
+    
+    with torch.no_grad():
+        # Original
+        logits_list, _ = model(images)
+        all_logits.append(logits_list[-1])
+        
+        # Horizontal flip
+        flipped_h = torch.flip(images, dims=[3])
+        logits_h, _ = model(flipped_h)
+        all_logits.append(torch.flip(logits_h[-1], dims=[3]))
+        
+        # Vertical flip
+        flipped_v = torch.flip(images, dims=[2])
+        logits_v, _ = model(flipped_v)
+        all_logits.append(torch.flip(logits_v[-1], dims=[2]))
+        
+        # 90° rotation
+        rot90 = torch.rot90(images, k=1, dims=[2, 3])
+        logits_90, _ = model(rot90)
+        all_logits.append(torch.rot90(logits_90[-1], k=-1, dims=[2, 3]))
+        
+        # 180° rotation
+        rot180 = torch.rot90(images, k=2, dims=[2, 3])
+        logits_180, _ = model(rot180)
+        all_logits.append(torch.rot90(logits_180[-1], k=-2, dims=[2, 3]))
+        
+        # 270° rotation
+        rot270 = torch.rot90(images, k=3, dims=[2, 3])
+        logits_270, _ = model(rot270)
+        all_logits.append(torch.rot90(logits_270[-1], k=-3, dims=[2, 3]))
+    
+    # Average all predictions
+    avg_logits = torch.mean(torch.stack(all_logits), dim=0)
+    return avg_logits
+
+
+# =============================================================================
 # EVALUATION METRICS
 # =============================================================================
 
-def evaluate_metrics(model, dataloader, device, num_classes=4):
-    """Evaluate segmentation metrics."""
+def evaluate_metrics(model, dataloader, device, num_classes=4, use_tta=False):
+    """Evaluate segmentation metrics with optional TTA."""
     model.eval()
     dice_s = [0.0] * num_classes
     hd95_s = [0.0] * num_classes
@@ -91,8 +144,11 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
             if imgs.size(0) == 0:
                 continue
             
-            logits_list, _ = model(imgs)
-            logits = logits_list[-1]
+            if use_tta:
+                logits = apply_tta(model, imgs)
+            else:
+                logits_list, _ = model(imgs)
+                logits = logits_list[-1]
             preds = torch.argmax(F.softmax(logits, dim=1), dim=1)
             batches += 1
 
@@ -322,8 +378,9 @@ def train_profile(profile_name, num_epochs=None, batch_size=None, quick_test=Fal
     
     print(f"Test slices: {len(test_dataset)}")
     
-    # Evaluate on test set
-    test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, num_classes)
+    # Evaluate on test set with TTA
+    print("Evaluating with TTA (6 augmentations)...")
+    test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, num_classes, use_tta=True)
     torch.cuda.empty_cache()
     
     test_fg_dice = np.mean(test_metrics['dice_scores'][1:])
