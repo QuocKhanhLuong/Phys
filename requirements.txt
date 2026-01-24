@@ -22,3 +22,8 @@ tqdm==4.67.1
 psutil
 
 h5py==3.14.0
+
+# Medical imaging & profiling
+medpy
+thop
+monai
