@@ -1,5 +1,5 @@
 """
-RobustMedVFL_UNet - UNet++ architecture with ePURE and Maxwell Solver integration.
+PIE_UNet - UNet++ architecture with ePURE and Maxwell Solver integration.
 From notebook: final-application-maxwell-for-segmentation-task (3).ipynb
 """
 
@@ -137,7 +137,7 @@ class BottleneckASPP(nn.Module):
         return self.project(res)
 
 
-class RobustMedVFL_UNet(nn.Module):
+class PIE_UNet(nn.Module):
     """
     UNet++ architecture with physics-informed components:
     - ePURE noise estimation in encoder

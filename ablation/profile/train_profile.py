@@ -286,10 +286,15 @@ def train_profile(profile_name, num_epochs=None, batch_size=None, quick_test=Fal
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)
     
     # Training loop
-    best_dice = 0.0
-    best_hd95 = float('inf')
+    best_val_metric = 0.0  # Best DICE
+    best_val_hd95 = float('inf')
+    best_val_overall = float('-inf')
     epochs_no_improve = 0
-    weights_path = OUTPUT_CONFIG["weights_dir"] / f"best_model_{profile_name}.pth"
+    
+    # Multiple weight files for different metrics (same as train_acdc.py)
+    model_save_name_dice = OUTPUT_CONFIG["weights_dir"] / f"best_model_{profile_name}_dice.pth"
+    model_save_name_hd95 = OUTPUT_CONFIG["weights_dir"] / f"best_model_{profile_name}_hd95.pth"
+    model_save_name_overall = OUTPUT_CONFIG["weights_dir"] / f"best_model_{profile_name}_overall.pth"
     
     for epoch in range(num_epochs):
         model.train()
@@ -337,31 +342,51 @@ def train_profile(profile_name, num_epochs=None, batch_size=None, quick_test=Fal
         fg_hd95_vals = [h for h in val_metrics['hd95'][1:] if not np.isnan(h)]
         avg_fg_hd95 = np.mean(fg_hd95_vals) if fg_hd95_vals else float('inf')
         
-        print(f"Epoch {epoch+1}: Loss={avg_loss:.4f}, Dice={avg_fg_dice:.4f}, HD95={avg_fg_hd95:.2f}")
+        # Calculate Overall Score (Dice + 1/(HD95+1)) 
+        safe_hd95 = avg_fg_hd95 if avg_fg_hd95 != float('inf') else 100.0
+        overall_score = avg_fg_dice + (1.0 / (safe_hd95 + 1.0))
+        
+        print(f"Epoch {epoch+1}: Loss={avg_loss:.4f}, Dice={avg_fg_dice:.4f}, HD95={avg_fg_hd95:.2f}, Overall={overall_score:.4f}")
         
         scheduler.step(avg_fg_dice)
         
-        if avg_fg_dice > best_dice:
-            best_dice = avg_fg_dice
-            best_hd95 = avg_fg_hd95
-            torch.save(model.state_dict(), weights_path)
-            print(f"  ✓ New best model saved!")
+        # Save Best Dice 
+        if avg_fg_dice > best_val_metric:
+            best_val_metric = avg_fg_dice
+            torch.save(model.state_dict(), model_save_name_dice)
+            print(f"  ✓ New best model (DICE) saved! Avg Foreground Dice: {best_val_metric:.4f}")
             epochs_no_improve = 0
         else:
             epochs_no_improve += 1
-            if epochs_no_improve >= TRAINING_CONFIG["early_stopping_patience"]:
-                print(f"\nEarly stopping triggered after {TRAINING_CONFIG['early_stopping_patience']} epochs with no improvement.")
-                break
+            print(f"  No improvement for {epochs_no_improve} epoch(s)")
+
+        # Save Best HD95 
+        if avg_fg_hd95 < best_val_hd95:
+            best_val_hd95 = avg_fg_hd95
+            torch.save(model.state_dict(), model_save_name_hd95)
+            print(f"  ✓ New best model (HD95) saved! Avg Foreground HD95: {best_val_hd95:.4f}")
+
+        # Save Best Overall 
+        if overall_score > best_val_overall:
+            best_val_overall = overall_score
+            torch.save(model.state_dict(), model_save_name_overall)
+            print(f"  ✓ New best model (OVERALL) saved! Score: {best_val_overall:.4f}")
+        
+        # Early stopping check
+        if epochs_no_improve >= TRAINING_CONFIG["early_stopping_patience"]:
+            print(f"\nEarly stopping triggered after {TRAINING_CONFIG['early_stopping_patience']} epochs with no improvement.")
+            break
     
     # =========================================================================
-    # TEST SET EVALUATION (Same as train_acdc.py)
+    # TEST SET EVALUATION 
     # =========================================================================
     print(f"\n{'='*60}")
     print("EVALUATING ON TEST SET")
     print(f"{'='*60}")
     
-    # Load best model
-    model.load_state_dict(torch.load(weights_path))
+    # Load best model (DICE)
+    print(f"\nLoading best model (DICE): {model_save_name_dice}")
+    model.load_state_dict(torch.load(model_save_name_dice))
     model.eval()
     
     # Create test dataset
@@ -395,7 +420,9 @@ def train_profile(profile_name, num_epochs=None, batch_size=None, quick_test=Fal
     print(f"  Avg Foreground HD95: {test_fg_hd95:.4f}")
     
     print(f"\nTraining completed for {config['name']}")
-    print(f"  Best Val Dice: {best_dice:.4f}")
+    print(f"  Best Val Dice: {best_val_metric:.4f}")
+    print(f"  Best Val HD95: {best_val_hd95:.4f}")
+    print(f"  Best Val Overall: {best_val_overall:.4f}")
     print(f"  Test Dice: {test_fg_dice:.4f}")
     print(f"  Test HD95: {test_fg_hd95:.4f}")
     
@@ -405,8 +432,9 @@ def train_profile(profile_name, num_epochs=None, batch_size=None, quick_test=Fal
         "n_channels": num_slices,
         "depth": config["depth"],
         "params": total_params,
-        "best_val_dice": best_dice,
-        "best_val_hd95": best_hd95,
+        "best_val_dice": best_val_metric,
+        "best_val_hd95": best_val_hd95,
+        "best_val_overall": best_val_overall,
         "test_dice": test_fg_dice,
         "test_hd95": test_fg_hd95,
         "peak_gpu_memory_mb": peak_gpu_memory_mb
@@ -436,6 +464,7 @@ if __name__ == "__main__":
     print(f"  Params: {result['params']:,}")
     print(f"  Best Val Dice: {result['best_val_dice']:.4f}")
     print(f"  Best Val HD95: {result['best_val_hd95']:.4f}")
+    print(f"  Best Val Overall: {result['best_val_overall']:.4f}")
     print(f"  Test Dice: {result['test_dice']:.4f}")
     print(f"  Test HD95: {result['test_hd95']:.4f}")
 

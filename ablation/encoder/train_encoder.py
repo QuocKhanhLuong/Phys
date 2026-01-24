@@ -75,11 +75,11 @@ val_test_transform = A.Compose([ToTensorV2()])
 # EVALUATION METRICS (Same as train_acdc.py)
 # =============================================================================
 
-def evaluate_metrics(model, dataloader, device, num_classes=4):
-    """Evaluate segmentation metrics with HD95."""
+def evaluate_metrics(model, dataloader, device, num_classes=4, compute_hd95=True):
+    """Evaluate segmentation metrics (Dice, and optional HD95)."""
     model.eval()
     dice_s = [0.0] * num_classes
-    hd95_s = [0.0] * num_classes
+    hd95_s = [0.0] * num_classes  # Only used if compute_hd95=True
     hd95_counts = [0] * num_classes
     batches = 0
 
@@ -100,28 +100,34 @@ def evaluate_metrics(model, dataloader, device, num_classes=4):
                 inter = (pc_f * tc_f).sum()
                 dice_s[c] += ((2. * inter + 1e-6) / (pc_f.sum() + tc_f.sum() + 1e-6)).item()
 
-            # HD95 on CPU
-            preds_cpu = preds.detach().cpu()
-            tgts_cpu = tgts.detach().cpu()
-            preds_oh = F.one_hot(preds_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
-            tgts_oh = F.one_hot(tgts_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
-            
-            try:
-                hd95_batch = compute_hausdorff_distance(y_pred=preds_oh, y=tgts_oh, include_background=True, percentile=95.0)
-                for c in range(num_classes):
-                    valid_vals = hd95_batch[:, c]
-                    mask = ~torch.isnan(valid_vals) & ~torch.isinf(valid_vals)
-                    if mask.any():
-                        hd95_s[c] += valid_vals[mask].sum().item()
-                        hd95_counts[c] += mask.sum().item()
-            except:
-                pass
+            # HD95 (Optimization: Skip during training validation to fix "stuck" issue)
+            if compute_hd95:
+                # Keep on GPU if possible, but MONAI might need CPU for some versions
+                # Try keeping on GPU first for speed? Safe bet is CPU for now but conditional.
+                preds_cpu = preds.detach().cpu()
+                tgts_cpu = tgts.detach().cpu()
+                preds_oh = F.one_hot(preds_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
+                tgts_oh = F.one_hot(tgts_cpu, num_classes=num_classes).permute(0, 3, 1, 2).float()
+                
+                try:
+                    hd95_batch = compute_hausdorff_distance(y_pred=preds_oh, y=tgts_oh, include_background=True, percentile=95.0)
+                    for c in range(num_classes):
+                        valid_vals = hd95_batch[:, c]
+                        mask = ~torch.isnan(valid_vals) & ~torch.isinf(valid_vals)
+                        if mask.any():
+                            hd95_s[c] += valid_vals[mask].sum().item()
+                            hd95_counts[c] += mask.sum().item()
+                except:
+                    pass
 
     metrics = {'dice_scores': [], 'hd95': []}
     if batches > 0:
         for c in range(num_classes):
             metrics['dice_scores'].append(dice_s[c] / batches)
-            metrics['hd95'].append(hd95_s[c] / hd95_counts[c] if hd95_counts[c] > 0 else float('nan'))
+            if compute_hd95:
+                metrics['hd95'].append(hd95_s[c] / hd95_counts[c] if hd95_counts[c] > 0 else float('nan'))
+            else:
+                metrics['hd95'].append(float('nan'))
     
     return metrics
 
@@ -174,17 +180,17 @@ def train_encoder(encoder_name, num_epochs=None):
     
     print(f"Data: {len(train_volume_ids)} train, {len(val_volume_ids)} val, {len(test_volume_ids)} test")
     
-    # ePURE augmenter
-    ePURE_augmenter = ePURE(in_channels=NUM_SLICES).to(DEVICE)
-    ePURE_augmenter.eval()
+    # ePURE NOT NEEDED for encoder ablation (encoders don't use noise estimation)
+    # ePURE_augmenter = ePURE(in_channels=NUM_SLICES).to(DEVICE)
+    # ePURE_augmenter.eval()
     
-    # Datasets
+    # Datasets (NO ePURE for encoder ablation - not needed!)
     train_dataset = ACDCDataset25DOptimized(
         npy_dir=train_npy_dir,
         volume_ids=train_volume_ids,
         num_input_slices=NUM_SLICES,
         transforms=train_transform,
-        noise_injector_model=ePURE_augmenter,
+        noise_injector_model=None,  # NO ePURE for encoder ablation!
         device=str(DEVICE),
         max_cache_size=15,
         use_memmap=True
@@ -208,9 +214,11 @@ def train_encoder(encoder_name, num_epochs=None):
         use_memmap=True
     )
     
-    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
-    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, pin_memory=True)
+    # DataLoaders 
+    NUM_WORKERS = 12  
+    train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=NUM_WORKERS, pin_memory=True, persistent_workers=True)
     
     print(f"Slices: {len(train_dataset)} train, {len(val_dataset)} val, {len(test_dataset)} test")
     
@@ -301,13 +309,13 @@ def train_encoder(encoder_name, num_epochs=None):
         
         avg_loss = epoch_loss / len(train_dataloader)
         
-        # Validation
-        val_metrics = evaluate_metrics(model, val_dataloader, DEVICE, NUM_CLASSES)
+        # Validation - DISABLE HD95 for speed!
+        val_metrics = evaluate_metrics(model, val_dataloader, DEVICE, NUM_CLASSES, compute_hd95=False)
         torch.cuda.empty_cache()
         
         avg_fg_dice = np.mean(val_metrics['dice_scores'][1:])
-        fg_hd95_vals = [h for h in val_metrics['hd95'][1:] if not np.isnan(h)]
-        avg_fg_hd95 = np.mean(fg_hd95_vals) if fg_hd95_vals else float('inf')
+        # No HD95 during val
+        avg_fg_hd95 = 0.0
         
         scheduler.step(avg_fg_dice)
         
@@ -332,7 +340,8 @@ def train_encoder(encoder_name, num_epochs=None):
     
     print("\nEvaluating on test set...")
     model.load_state_dict(torch.load(weights_path))
-    test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, NUM_CLASSES)
+    # Test set - Enable HD95 here for final result
+    test_metrics = evaluate_metrics(model, test_dataloader, DEVICE, NUM_CLASSES, compute_hd95=True)
     
     test_fg_dice = np.mean(test_metrics['dice_scores'][1:])
     test_fg_hd95_vals = [h for h in test_metrics['hd95'][1:] if not np.isnan(h)]

@@ -23,17 +23,32 @@ ENCODER_CONFIGS = {
     "SE": {
         "name": "Squeeze-Excite",
         "type": "se",
-        "description": "Standard + SE channel attention"
+        "description": "Standard + SE channel attention (reduction=16)"
+    },
+    "SE_NoReduction": {
+        "name": "SE (No Reduction)",
+        "type": "se_noreduction",
+        "description": "SE with reduction=1 (max params, no bottleneck)"
     },
     "ResNet": {
         "name": "Residual",
         "type": "resnet",
-        "description": "Standard + residual skip connection (BasicBlock)"
+        "description": "ResNet BasicBlock (3x3→3x3 with skip)"
+    },
+    "ResNet18": {
+        "name": "ResNet-18 (Stage)",
+        "type": "resnet18",
+        "description": "2 BasicBlocks per stage (Matches ResNet-18, heavier than NAE)"
     },
     "CBAM": {
         "name": "CBAM Attention",
         "type": "cbam",
-        "description": "Standard + CBAM (Channel + Spatial attention)"
+        "description": "Channel + Spatial attention (reduction=16)"
+    },
+    "CBAM_NoReduction": {
+        "name": "CBAM (No Reduction)",
+        "type": "cbam_noreduction",
+        "description": "CBAM with reduction=1 (max params)"
     },
     "NAE": {
         "name": "NAE (Original)",

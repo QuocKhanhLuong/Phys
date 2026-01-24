@@ -107,13 +107,19 @@ class SEEncoderBlock(nn.Module):
 
 class ResNetEncoderBlock(nn.Module):
     """
-    Encoder block with residual connection.
-    Standard Conv + skip connection.
+    ResNet BasicBlock encoder (standard implementation).
+    Conv3x3-BN-ReLU → Conv3x3-BN → Add(shortcut) → ReLU
     """
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.conv_block1 = BasicConvBlock(in_channels, out_channels)
-        self.conv_block2 = nn.Sequential(
+        # First conv with BN and ReLU
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+        # Second conv with BN only (no ReLU before residual add)
+        self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(out_channels)
         )
@@ -128,10 +134,10 @@ class ResNetEncoderBlock(nn.Module):
 
     def forward(self, x):
         identity = self.shortcut(x)
-        out = self.conv_block1(x)
-        out = self.conv_block2(out)
+        out = self.conv1(x)
+        out = self.conv2(out)
         out = out + identity
-        out = self.relu(out)
+        out = self.relu(out)  # ReLU after addition
         return out
 
 
@@ -193,6 +199,69 @@ class CBAMEncoderBlock(nn.Module):
         self.conv_block1 = BasicConvBlock(in_channels, out_channels)
         self.conv_block2 = BasicConvBlock(out_channels, out_channels)
         self.cbam = CBAMBlock(out_channels, reduction)
+
+    def forward(self, x):
+        x = self.conv_block1(x)
+        x = self.conv_block2(x)
+        x = self.cbam(x)
+        return x
+
+
+# =============================================================================
+# VARIANTS: ResNet-18 (2 Basic Blocks per stage)
+# =============================================================================
+
+class ResNet18EncoderBlock(nn.Module):
+    """
+    ResNet-18 style encoder block.
+    Consists of 2 BasicBlocks per stage (standard ResNet-18/34 topology).
+    This is 'heavier' than the Standard/NAE block (which effectively has 1 block of 2 convs).
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        # First BasicBlock: adjust channels
+        self.block1 = ResNetEncoderBlock(in_channels, out_channels)
+        # Second BasicBlock: maintain channels (refinement)
+        self.block2 = ResNetEncoderBlock(out_channels, out_channels)
+
+    def forward(self, x):
+        x = self.block1(x)
+        x = self.block2(x)
+        return x
+
+
+# =============================================================================
+# VARIANTS: SE and CBAM without reduction (full params)
+# =============================================================================
+
+class SEEncoderBlock_NoReduction(nn.Module):
+    """
+    SE Encoder with NO reduction (reduction=1).
+    Maximum parameters - no bottleneck in attention.
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv_block1 = BasicConvBlock(in_channels, out_channels)
+        self.conv_block2 = BasicConvBlock(out_channels, out_channels)
+        self.se = SEBlock(out_channels, reduction=1)  # No reduction!
+
+    def forward(self, x):
+        x = self.conv_block1(x)
+        x = self.conv_block2(x)
+        x = self.se(x)
+        return x
+
+
+class CBAMEncoderBlock_NoReduction(nn.Module):
+    """
+    CBAM Encoder with NO reduction (reduction=1).
+    Maximum parameters - no bottleneck in channel attention.
+    """
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv_block1 = BasicConvBlock(in_channels, out_channels)
+        self.conv_block2 = BasicConvBlock(out_channels, out_channels)
+        self.cbam = CBAMBlock(out_channels, reduction=1)  # No reduction!
 
     def forward(self, x):
         x = self.conv_block1(x)
@@ -579,8 +648,11 @@ def get_encoder_block(encoder_type: str, in_channels: int, out_channels: int):
     encoder_map = {
         'standard': StandardEncoderBlock,
         'se': SEEncoderBlock,
+        'se_noreduction': SEEncoderBlock_NoReduction,
         'resnet': ResNetEncoderBlock,
+        'resnet18': ResNet18EncoderBlock,
         'cbam': CBAMEncoderBlock,
+        'cbam_noreduction': CBAMEncoderBlock_NoReduction,
         'nae': NAEEncoderBlock,
         # New encoders
         'resnet50': ResNet50EncoderBlock,

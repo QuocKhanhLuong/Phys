@@ -42,6 +42,40 @@ NUM_CLASSES = 4
 ACDC_CLASS_MAP = {0: 'Background', 1: 'Right Ventricle', 2: 'Myocardium', 3: 'Left Ventricle'}
 
 
+def find_profile_weights(profile_name, weights_dir):
+    """
+    Auto-detect all weight files for a given profile in the weights directory.
+    
+    Returns:
+        List of tuples: [(weight_path, weight_name), ...]
+    """
+    weights_dir = Path(weights_dir)
+    if not weights_dir.exists():
+        return []
+    
+    # Find all .pth files matching the profile
+    pattern = f"best_model_{profile_name}*.pth"
+    weight_files = list(weights_dir.glob(pattern))
+    
+    results = []
+    for w_path in sorted(weight_files):
+        # Extract weight type from filename
+        # E.g., "best_model_XL_dice.pth" -> "dice"
+        #       "best_model_XL.pth" -> "default"
+        filename = w_path.stem  # Remove .pth
+        base_name = f"best_model_{profile_name}"
+        
+        if filename == base_name:
+            weight_name = "default"
+        else:
+            # Remove base_name and leading underscore
+            weight_name = filename[len(base_name)+1:]
+        
+        results.append((w_path, weight_name))
+    
+    return results
+
+
 def evaluate_3d_volumetric(model, test_dataset, test_loader, device, num_classes=4):
     """
     Evaluate using TRUE 3D volumetric metrics (same as evaluate_acdc.py).
@@ -150,16 +184,33 @@ def evaluate_3d_volumetric(model, test_dataset, test_loader, device, num_classes
     return results
 
 
-def evaluate_profile_3d(profile_name, verbose=True):
+def evaluate_profile_3d(profile_name, weights_path=None, weight_name=None, verbose=True):
     """
     Evaluate a single profile with FULL metrics:
     - Computational: Params, MACs, GFLOPs, CPU Latency
     - Peak GPU VRAM during inference
     - 3D Volumetric: Dice, HD95 (same as evaluate_acdc.py)
+    
+    Args:
+        profile_name: Profile to evaluate (T, M, XL, etc.)
+        weights_path: Path to weight file (if None, will auto-detect)
+        weight_name: Name/identifier for this weight variant
+        verbose: Print detailed output
     """
     
     config = PROFILE_CONFIGS[profile_name]
-    weights_path = OUTPUT_CONFIG["weights_dir"] / f"best_model_{profile_name}.pth"
+    
+    # If no weights_path provided, try to find default
+    if weights_path is None:
+        detected_weights = find_profile_weights(profile_name, OUTPUT_CONFIG["weights_dir"])
+        if not detected_weights:
+            print(f"Error: No weights found for profile {profile_name}")
+            return None
+        weights_path, weight_name = detected_weights[0]  # Use first one
+        if verbose:
+            print(f"Auto-detected weight: {weights_path}")
+    else:
+        weights_path = Path(weights_path)
     
     if not weights_path.exists():
         print(f"Error: Weights not found: {weights_path}")
@@ -241,19 +292,22 @@ def evaluate_profile_3d(profile_name, verbose=True):
     if verbose:
         print(f"\n  Peak GPU VRAM: {peak_gpu_mb:.0f} MB")
         print(f"\n  Per-Class 3D Metrics:")
-        print(f"  {'Class':<20} | {'Dice':<10} | {'HD95':<10}")
-        print(f"  {'-'*50}")
+        print(f"  {'Class':<25} | {'Dice':<10} | {'HD95':<10}")
+        print(f"  {'-'*55}")
         for c in range(1, NUM_CLASSES):
-            class_name = ACDC_CLASS_MAP[c]
+            class_name = f"{ACDC_CLASS_MAP[c]}"
             d = results['per_class_dice'][c]
             h = results['per_class_hd95'][c]
-            print(f"  {class_name:<20} | {d:.4f}     | {h:.4f}")
-        print(f"  {'-'*50}")
-        print(f"  {'Foreground Mean':<20} | {results['mean_fg_dice']:.4f}     | {results['mean_fg_hd95']:.4f}")
+            hd_str = f"{h:.4f}" if not np.isnan(h) else "NaN"
+            print(f"  {class_name:<25} | {d:.4f}     | {hd_str:<10}")
+        print(f"  {'-'*55}")
+        print(f"  {'Foreground Mean':<25} | {results['mean_fg_dice']:.4f}     | {results['mean_fg_hd95']:.4f}")
     
     return {
         "profile": profile_name,
         "name": config["name"],
+        "weight_file": str(weights_path.name),
+        "weight_name": weight_name if weight_name else "unknown",
         "n_channels": config["n_channels"],
         "depth": config["depth"],
         # Computational metrics
@@ -276,61 +330,74 @@ def evaluate_profile_3d(profile_name, verbose=True):
 
 
 def evaluate_all_profiles_3d():
-    """Re-evaluate all profiles with FULL metrics: computational + 3D volumetric."""
+    """Re-evaluate all profiles with FULL metrics for ALL weight variants found in directory."""
     
     print("=" * 100)
-    print("FULL ABLATION EVALUATION (Computational + 3D Volumetric)")
+    print("FULL ABLATION EVALUATION (Computational + 3D Volumetric) - AUTO-DETECTING WEIGHTS")
     print("=" * 100)
     
     all_results = []
     
     for profile_name in PROFILE_CONFIGS.keys():
-        result = evaluate_profile_3d(profile_name, verbose=True)
-        if result:
-            all_results.append(result)
+        # Auto-detect all weights for this profile
+        detected_weights = find_profile_weights(profile_name, OUTPUT_CONFIG["weights_dir"])
+        
+        if not detected_weights:
+            print(f"\n⚠️  No weights found for profile {profile_name}, skipping...")
+            continue
+        
+        print(f"\n{'='*100}")
+        print(f"Profile {profile_name}: Found {len(detected_weights)} weight file(s)")
+        print(f"{'='*100}")
+        
+        for weights_path, weight_name in detected_weights:
+            print(f"\n  → Evaluating: {weights_path.name} ({weight_name})")
+            result = evaluate_profile_3d(profile_name, weights_path=weights_path, weight_name=weight_name, verbose=True)
+            if result:
+                all_results.append(result)
     
     # Save results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_dir = OUTPUT_CONFIG["results_dir"]
     
-    # CSV with all fields
+    # CSV with all fields including weight info
     import csv
     csv_path = output_dir / f"ablation_full_3d_{timestamp}.csv"
     with open(csv_path, 'w', newline='') as f:
-        fieldnames = ['name', 'n_channels', 'depth', 'params', 'g_macs', 'gflops', 
+        fieldnames = ['name', 'weight_name', 'weight_file', 'n_channels', 'depth', 'params', 'g_macs', 'gflops', 
                       'cpu_latency_ms', 'cpu_latency_std', 'peak_gpu_mb', 
                       'test_dice_3d', 'test_dice_std', 'test_hd95_3d', 'test_hd95_std']
         writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
         writer.writerows(all_results)
     
-    # Markdown with full format
+    # Markdown with full format including weight info
     md_path = output_dir / "ablation_full_3d_results.md"
     with open(md_path, 'w') as f:
-        f.write("# PIE-UNet Ablation - FULL Evaluation Results\n\n")
+        f.write("# PIE-UNet Ablation - FULL Evaluation Results (All Detected Weights)\n\n")
         f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
         f.write("## Computational Metrics + 3D Volumetric Accuracy\n\n")
-        f.write("| Profile | C_in | Depth | Params | G-MACs | GFLOPs | CPU Latency | Peak GPU | Dice (3D) | HD95 (3D) |\n")
-        f.write("|---------|------|-------|--------|--------|--------|-------------|----------|-----------|----------|\n")
+        f.write("| Profile | Weight | Weight File | C_in | Depth | Params | G-MACs | GFLOPs | CPU Latency | Peak GPU | Dice (3D) | HD95 (3D) |\n")
+        f.write("|---------|--------|-------------|------|-------|--------|--------|--------|-------------|----------|-----------|----------|\n")
         for r in all_results:
-            f.write(f"| {r['name']} | {r['n_channels']} | {r['depth']} | "
+            f.write(f"| {r['name']} | {r['weight_name']} | {r['weight_file']} | {r['n_channels']} | {r['depth']} | "
                     f"{r['params']:,} | {r['g_macs']:.4f} | {r['gflops']:.4f} | "
                     f"{r['cpu_latency_ms']:.2f}±{r['cpu_latency_std']:.2f}ms | {r['peak_gpu_mb']:.0f}MB | "
                     f"{r['test_dice_3d']:.4f}±{r['test_dice_std']:.4f} | {r['test_hd95_3d']:.4f}±{r['test_hd95_std']:.4f} |\n")
     
-    # Print summary
-    print("\n" + "=" * 140)
-    print("ABLATION STUDY COMPLETE - FULL RESULTS")
-    print("=" * 140)
-    print(f"\n{'Profile':<14} {'C_in':<5} {'Depth':<6} {'Params':<12} {'G-MACs':<10} {'GFLOPs':<10} "
+    # Print summary with weight info
+    print("\n" + "=" * 170)
+    print("ABLATION STUDY COMPLETE - FULL RESULTS (ALL DETECTED WEIGHTS)")
+    print("=" * 170)
+    print(f"\n{'Profile':<14} {'Weight':<12} {'Weight File':<30} {'C_in':<5} {'Depth':<6} {'Params':<12} {'G-MACs':<10} {'GFLOPs':<10} "
           f"{'CPU Latency':<16} {'Peak GPU':<10} {'Dice 3D':<16} {'HD95 3D':<16}")
-    print("-" * 140)
+    print("-" * 170)
     for r in all_results:
-        print(f"{r['name']:<14} {r['n_channels']:<5} {r['depth']:<6} "
+        print(f"{r['name']:<14} {r['weight_name']:<12} {r['weight_file']:<30} {r['n_channels']:<5} {r['depth']:<6} "
               f"{r['params']:<12,} {r['g_macs']:<10.4f} {r['gflops']:<10.4f} "
               f"{r['cpu_latency_ms']:.2f}±{r['cpu_latency_std']:.2f}ms{'':<4} {r['peak_gpu_mb']:.0f}MB{'':<6} "
               f"{r['test_dice_3d']:.4f}±{r['test_dice_std']:.4f}{'':<4} {r['test_hd95_3d']:.4f}±{r['test_hd95_std']:.4f}")
-    print("=" * 140)
+    print("=" * 170)
     print(f"\nResults saved to:")
     print(f"  - {csv_path}")
     print(f"  - {md_path}")
@@ -341,12 +408,38 @@ def evaluate_all_profiles_3d():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Re-evaluate ablation models with 3D metrics")
     parser.add_argument("--profile", type=str, choices=list(PROFILE_CONFIGS.keys()),
-                        help="Specific profile to evaluate (default: all)")
+                        help="Specific profile to evaluate (default: all profiles)")
+    parser.add_argument("--weights-path", type=str,
+                        help="Specific weight file path to evaluate")
+    parser.add_argument("--weights-dir", type=str,
+                        help="Directory containing weight files (default: ablation/profile/weights)")
     args = parser.parse_args()
     
     print(f"Device: {DEVICE}")
     
+    # Override weights directory if specified
+    if args.weights_dir:
+        OUTPUT_CONFIG["weights_dir"] = Path(args.weights_dir)
+        print(f"Using weights directory: {OUTPUT_CONFIG['weights_dir']}")
+    
     if args.profile:
-        evaluate_profile_3d(args.profile, verbose=True)
+        # Evaluate specific profile
+        if args.weights_path:
+            # Specific weight file provided
+            weight_name = Path(args.weights_path).stem
+            evaluate_profile_3d(args.profile, weights_path=args.weights_path, weight_name=weight_name, verbose=True)
+        else:
+            # Auto-detect all weights for this profile
+            detected_weights = find_profile_weights(args.profile, OUTPUT_CONFIG["weights_dir"])
+            if not detected_weights:
+                print(f"Error: No weights found for profile {args.profile}")
+            else:
+                print(f"\nFound {len(detected_weights)} weight file(s) for profile {args.profile}:")
+                for i, (w_path, w_name) in enumerate(detected_weights, 1):
+                    print(f"  {i}. {w_path.name} ({w_name})")
+                print("\nEvaluating all detected weights...\n")
+                for w_path, w_name in detected_weights:
+                    evaluate_profile_3d(args.profile, weights_path=w_path, weight_name=w_name, verbose=True)
     else:
+        # Evaluate all profiles with all detected weights
         evaluate_all_profiles_3d()

@@ -17,7 +17,7 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.models.unet import RobustMedVFL_UNet 
+from src.models.unet import PIE_UNet
 from src.data_utils.scd_dataset_optimized import (
     SCDDataset25DOptimized,
     get_scd_volume_ids,
@@ -98,7 +98,7 @@ def main():
         sys.exit(1)
 
     print(f"Loading model from: {MODEL_PATH}")
-    model = RobustMedVFL_UNet(n_channels=NUM_SLICES, n_classes=NUM_CLASSES, deep_supervision=True).to(DEVICE)
+    model = PIE_UNet(n_channels=NUM_SLICES, n_classes=NUM_CLASSES, deep_supervision=True).to(DEVICE)
     model.load_state_dict(torch.load(MODEL_PATH))
     model.eval()
 

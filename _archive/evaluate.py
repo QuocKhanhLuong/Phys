@@ -194,9 +194,9 @@ def evaluate_metrics_with_tta(model, dataloader, device, num_classes=4):
 
 def run_and_print_test_evaluation(test_dataloader, device, num_classes, num_slices):
     print("\n--- Evaluating on Test Set with TTA ---")
-    from models import RobustMedVFL_UNet
+    from models import PIE_UNet
     
-    model = RobustMedVFL_UNet(n_channels=num_slices, n_classes=num_classes)
+    model = PIE_UNet(n_channels=num_slices, n_classes=num_classes)
     model_path = "best_model.pth"
     
     if os.path.exists(model_path):
@@ -240,9 +240,9 @@ def visualize_final_results_2_5D(volumes_np, masks_np, num_classes, num_samples,
         return
         
     print("\n--- Visualizing Final Results ---")
-    from models import RobustMedVFL_UNet
+    from models import PIE_UNet
     
-    model = RobustMedVFL_UNet(n_channels=num_slices, n_classes=num_classes)
+    model = PIE_UNet(n_channels=num_slices, n_classes=num_classes)
     model_path = "best_model.pth"
     
     if os.path.exists(model_path):

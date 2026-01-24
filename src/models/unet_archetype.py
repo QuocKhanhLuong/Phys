@@ -157,7 +157,7 @@ class EncoderBlock(nn.Module):
         return x
 
 
-class RobustMedVFL_UNet(nn.Module):
+class PIE_UNet(nn.Module):
     def __init__(self, n_channels=1, n_classes=4, deep_supervision=True):
         super().__init__()
         self.deep_supervision = deep_supervision

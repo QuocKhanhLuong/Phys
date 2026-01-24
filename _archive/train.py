@@ -11,7 +11,7 @@ from itertools import chain
 from tqdm import tqdm
 
 # Import các thành phần cần thiết từ project của bạn
-from models import RobustMedVFL_UNet, print_model_parameters
+from models import PIE_UNet, print_model_parameters
 from losses import CombinedLoss
 from data_utils import get_patient_ids_from_npy, load_brats21_volumes
 from evaluate import evaluate_metrics, run_and_print_test_evaluation, visualize_final_results_2_5D
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     gpu_augmenter = GpuAugmentation(NUM_SLICES).to(DEVICE)
 
     print("Initializing model...")
-    model = RobustMedVFL_UNet(n_channels=NUM_SLICES * 4, n_classes=NUM_CLASSES).to(DEVICE)
+    model = PIE_UNet(n_channels=NUM_SLICES * 4, n_classes=NUM_CLASSES).to(DEVICE)
     criterion = CombinedLoss(num_classes=NUM_CLASSES, use_physics=False, fixed_weights=True).to(DEVICE) # Tạm thời tắt physics loss
     optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=10)

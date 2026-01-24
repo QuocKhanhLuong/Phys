@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.models.unet import RobustMedVFL_UNet 
+from src.models.unet import PIE_UNet
 from src.models.epure import ePURE
 from src.modules.losses import CombinedLoss
 from src.data_utils.mnm_dataset_optimized import (
@@ -249,7 +249,7 @@ common_b1_map = calculate_ultimate_common_b1_map(
 )
 
 print("Initializing model")
-model = RobustMedVFL_UNet(n_channels=NUM_SLICES, n_classes=NUM_CLASSES, deep_supervision=True).to(DEVICE)
+model = PIE_UNet(n_channels=NUM_SLICES, n_classes=NUM_CLASSES, deep_supervision=True).to(DEVICE)
 
 total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 print(f"Model parameters: {total_params:,}")
