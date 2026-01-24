@@ -290,8 +290,8 @@ def evaluate_encoder(encoder_name, verbose=True):
     
     if verbose:
         print(f"  Peak GPU: {peak_gpu_mb:.0f}MB")
-        print(f"  Dice (3D): {results_3d['mean_dice']:.4f}±{results_3d['std_dice']:.4f}")
-        print(f"  HD95 (3D): {results_3d['mean_hd95']:.4f}±{results_3d['std_hd95']:.4f}")
+        print(f"  Dice (3D): {results_3d['mean_dice']:.4f}")
+        print(f"  HD95 (3D): {results_3d['mean_hd95']:.4f}")
     
     return {
         "encoder": encoder_name,
@@ -355,20 +355,19 @@ def evaluate_all_encoders():
         f.write("|---------|---------|-------|--------|-----------|----------|\n")
         for r in all_results:
             f.write(f"| {r['name']} | {r['params']:,} | {r['g_macs']:.4f} | {r['gflops']:.4f} | "
-                    f"{r['test_dice_3d']:.4f}±{r['test_dice_std']:.4f} | "
-                    f"{r['test_hd95_3d']:.4f}±{r['test_hd95_std']:.4f} |\n")
+                    f"{r['test_dice_3d']:.4f} | "
+                    f"{r['test_hd95_3d']:.4f} |\n")
     
     # Print summary
     print("\n" + "=" * 120)
     print("ENCODER ABLATION COMPLETE")
     print("=" * 120)
-    print(f"\n{'Encoder':<20} {'Params':<12} {'GMACs':<10} {'GFLOPs':<10} {'Dice 3D':<18} {'HD95 3D':<18}")
-    print("-" * 100)
+    print(f"\n{'Encoder':<20} {'Params':<12} {'GMACs':<10} {'GFLOPs':<10} {'Dice 3D':<10} {'HD95 3D':<10}")
+    print("-" * 80)
     for r in all_results:
         print(f"{r['name']:<20} {r['params']:<12,} {r['g_macs']:<10.4f} {r['gflops']:<10.4f} "
-              f"{r['test_dice_3d']:.4f}±{r['test_dice_std']:.4f}{'':<4} "
-              f"{r['test_hd95_3d']:.4f}±{r['test_hd95_std']:.4f}")
-    print("=" * 120)
+              f"{r['test_dice_3d']:<10.4f} {r['test_hd95_3d']:<10.4f}")
+    print("=" * 80)
     print(f"\nResults saved to:")
     print(f"  - {csv_path}")
     print(f"  - {md_path}")
