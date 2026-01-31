@@ -312,18 +312,15 @@ python scripts/visualize_model_comparison.py
 
 ### Per-Patient Segmentation Results
 
-| Patient | Input MRI | Ground Truth | PGE-UNet (Ours) |
-|:-------:|:---------:|:------------:|:---------------:|
-| **103** | <img src="assets/patients/patient103_input.png" width="150"> | <img src="assets/patients/patient103_gt.png" width="150"> | <img src="assets/patients/patient103_pred.png" width="150"> |
-| **104** | <img src="assets/patients/patient104_input.png" width="150"> | <img src="assets/patients/patient104_gt.png" width="150"> | <img src="assets/patients/patient104_pred.png" width="150"> |
-| **105** | <img src="assets/patients/patient105_input.png" width="150"> | <img src="assets/patients/patient105_gt.png" width="150"> | <img src="assets/patients/patient105_pred.png" width="150"> |
-| **112** | <img src="assets/patients/patient112_input.png" width="150"> | <img src="assets/patients/patient112_gt.png" width="150"> | <img src="assets/patients/patient112_pred.png" width="150"> |
-| **113** | <img src="assets/patients/patient113_input.png" width="150"> | <img src="assets/patients/patient113_gt.png" width="150"> | <img src="assets/patients/patient113_pred.png" width="150"> |
-| **114** | <img src="assets/patients/patient114_input.png" width="150"> | <img src="assets/patients/patient114_gt.png" width="150"> | <img src="assets/patients/patient114_pred.png" width="150"> |
+<p align="center">
+  <img src="assets/patient_comparison_grid.png" alt="Per-Patient Comparison" width="80%">
+</p>
 
 <p align="center">
-  <em>Segmentation results on ACDC test patients. Colors: <span style="color:red">■</span> RV (Right Ventricle), <span style="color:green">■</span> MYO (Myocardium), <span style="color:blue">■</span> LV (Left Ventricle)</em>
+  <em>Segmentation results on 6 ACDC test patients (103-114). Left: Input MRI | Center: Ground Truth | Right: PGE-UNet prediction.<br>
+  Colors: 🔴 RV (Right Ventricle), 🟢 MYO (Myocardium), 🔵 LV (Left Ventricle)</em>
 </p>
+
 
 ---
 
