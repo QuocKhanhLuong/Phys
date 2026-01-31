@@ -30,8 +30,8 @@ warnings.filterwarnings("ignore")
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, PROJECT_ROOT)
 
-from ablation.profile.config import PROFILE_CONFIGS, TRAINING_CONFIG, DATA_CONFIG, OUTPUT_CONFIG
-from ablation.profile.pie_unet import PIE_UNet
+from profiles.config import PROFILE_CONFIGS, TRAINING_CONFIG, DATA_CONFIG, OUTPUT_CONFIG
+from profiles.pie_unet import PIE_UNet
 from src.models.epure import ePURE
 from src.modules.losses import CombinedLoss
 from src.data_utils.acdc_dataset_optimized import (

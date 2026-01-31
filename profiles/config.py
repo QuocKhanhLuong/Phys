@@ -19,12 +19,12 @@ sys.path.insert(0, str(PROJECT_ROOT))
 # | PIE-UNet-XL | 7    | 6     |
 
 PROFILE_CONFIGS = {
-    "T": {
-        "name": "PIE-UNet-T",
+    "S": {
+        "name": "PIE-UNet-S",
         "n_channels": 3,  # C_in: number of input slices (2.5D)
         "depth": 4,       # Number of encoder levels
         "base_filters": 16,  # Base number of filters
-        "description": "Tiny - smallest model"
+        "description": "Small - smaller model"
     },
     "M": {
         "name": "PIE-UNet-M",
@@ -33,12 +33,12 @@ PROFILE_CONFIGS = {
         "base_filters": 16,
         "description": "Medium - baseline configuration"
     },
-    "XL": {
-        "name": "PIE-UNet-XL",
+    "L": {
+        "name": "PIE-UNet-L",
         "n_channels": 7,
         "depth": 6,
         "base_filters": 16,
-        "description": "Extra Large - largest model"
+        "description": "Large - larger model"
     }
 }
 

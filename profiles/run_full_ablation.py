@@ -17,9 +17,9 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ablation.profile.config import PROFILE_CONFIGS, OUTPUT_CONFIG, TRAINING_CONFIG
-from ablation.profile.measure_profile import measure_profile
-from ablation.profile.train_profile import train_profile
+from profiles.config import PROFILE_CONFIGS, OUTPUT_CONFIG, TRAINING_CONFIG
+from profiles.measure_profile import measure_profile
+from profiles.train_profile import train_profile
 
 
 def run_full_ablation(epochs=None, quick_test=False):

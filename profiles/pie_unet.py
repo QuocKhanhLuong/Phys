@@ -248,7 +248,7 @@ class PIE_UNet(nn.Module):
 
 def get_model_for_profile(profile_name, n_classes=4, deep_supervision=True):
     """Factory function to create a model based on profile name."""
-    from ablation.profile.config import PROFILE_CONFIGS
+    from profiles.config import PROFILE_CONFIGS
     
     if profile_name not in PROFILE_CONFIGS:
         raise ValueError(f"Unknown profile: {profile_name}. Available: {list(PROFILE_CONFIGS.keys())}")

@@ -5,8 +5,8 @@ This script re-evaluates saved ablation weights using TRUE 3D volumetric
 metrics (same as evaluate_acdc.py) instead of 2D slice-by-slice.
 
 Usage:
-    python ablation/profile/evaluate_3d.py              # Evaluate all profiles
-    python ablation/profile/evaluate_3d.py --profile M  # Evaluate single profile
+    python profile/evaluate_3d.py              # Evaluate all profiles
+    python profile/evaluate_3d.py --profile M  # Evaluate single profile
 """
 
 import torch
@@ -26,9 +26,9 @@ from datetime import datetime
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ablation.profile.config import PROFILE_CONFIGS, DATA_CONFIG, OUTPUT_CONFIG, MEASURE_CONFIG
-from ablation.profile.pie_unet import PIE_UNet
-from ablation.profile.measure_profile import measure_profile
+from profiles.config import PROFILE_CONFIGS, DATA_CONFIG, OUTPUT_CONFIG, MEASURE_CONFIG
+from profiles.pie_unet import PIE_UNet
+from profiles.measure_profile import measure_profile
 from src.data_utils.acdc_dataset_optimized import (
     ACDCDataset25DOptimized,
     get_acdc_volume_ids,
@@ -412,7 +412,7 @@ if __name__ == "__main__":
     parser.add_argument("--weights-path", type=str,
                         help="Specific weight file path to evaluate")
     parser.add_argument("--weights-dir", type=str,
-                        help="Directory containing weight files (default: ablation/profile/weights)")
+                        help="Directory containing weight files (default: profile/weights)")
     args = parser.parse_args()
     
     print(f"Device: {DEVICE}")

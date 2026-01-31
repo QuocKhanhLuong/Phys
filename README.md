@@ -159,56 +159,51 @@ python scripts/evaluate_scd.py
   Colors: 🔴 RV (Right Ventricle), 🟢 MYO (Myocardium), 🔵 LV (Left Ventricle)</em>
 </p>
 
+### Qualitative Comparison
+
+<p align="center">
+  <img src="assets/comparison.png" alt="Model Comparison" width="100%">
+</p>
+
 ---
 
-## Ablation Study
+## Multi-variant Support
 
 ### Model Profile Comparison
 
 | Profile | Input Slices | Depth | Params | GFLOPs | Mean Dice |
 |---------|-------------|-------|--------|--------|-----------|
-| **T** (Tiny) | 3 | 4 | 0.5M | 12.3 | 0.8921 |
+| **S** (Small) | 3 | 4 | 0.5M | 12.3 | 0.8921 |
 | **M** (Medium) | 5 | 5 | 1.6M | 28.7 | 0.9152 |
-| **XL** (Extra Large) | 7 | 6 | 4.2M | 56.4 | 0.9198 |
+| **L** (Large) | 7 | 6 | 4.2M | 56.4 | 0.9198 |
 
-### Training Ablation Models
+### Training Profiles
 
 ```bash
 conda activate pge-unet
 cd /path/to/Phys
 
 # Train specific profile
-python -m ablation.profile.train_profile --profile T    # Tiny
-python -m ablation.profile.train_profile --profile M    # Medium
-python -m ablation.profile.train_profile --profile XL   # Extra Large
+python -m profiles.train_profile --profile S    # Small
+python -m profiles.train_profile --profile M    # Medium
+python -m profiles.train_profile --profile L    # Large
+
 
 # Train all profiles sequentially
-python -m ablation.profile.run_full_ablation
+python -m profiles.run_full_ablation
 
 # Evaluate specific profile
-python -m ablation.profile.evaluate_3d --profile T
+python -m profiles.evaluate_3d --profile T
 
-# Evaluate all profiles with full metrics
-python -m ablation.profile.evaluate_3d
-
-# Measure computational metrics (Params, GFLOPs, CPU Latency)
-python -m ablation.profile.measure_profile
+# Measure computational metrics
+python -m profiles.measure_profile
 ```
 
 ---
 
 ## Citation
 
-If you find this work useful, please cite:
-
-```bibtex
-@article{pgeunet2024,
-  title={PGE-UNet: Physics-Guided Encoder for Efficient Cardiac MRI Segmentation},
-  author={Author Names},
-  journal={Journal Name},
-  year={2024}
-}
-```
+Citation link will be updated later.
 
 ---
 
@@ -222,7 +217,10 @@ For commercial use, please contact the authors.
 
 ## Acknowledgements
 
-- [ACDC Dataset](https://www.creatis.insa-lyon.fr/Challenge/acdc/)
-- [M&M Challenge](https://www.ub.edu/mnms/)
-- [nnUNet](https://github.com/MIC-DKFZ/nnUNet)
-- [Swin-Unet](https://github.com/HuCaoFighting/Swin-Unet)
+This project builds upon the knowledge and codebases of:
+
+- **UNet++**: A Nested U-Net Architecture for Medical Image Segmentation.
+- **Nested U-Net**: Deep supervision and dense skip pathways.
+- **nnUNet**: Self-adapting Framework for U-Net-Based Medical Image Segmentation.
+- **Swin-Unet**: Unet-like Pure Transformer for Medical Image Segmentation.
+

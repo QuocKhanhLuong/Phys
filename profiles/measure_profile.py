@@ -20,15 +20,15 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from thop import profile, clever_format
+    from thop import profiles, clever_format
 except ImportError:
     print("Installing thop...")
     import subprocess
     subprocess.check_call([sys.executable, "-m", "pip", "install", "thop"])
-    from thop import profile, clever_format
+    from thop import profiles, clever_format
 
-from ablation.profile.config import PROFILE_CONFIGS, MEASURE_CONFIG
-from ablation.profile.pie_unet import PIE_UNet
+from profiles.config import PROFILE_CONFIGS, MEASURE_CONFIG
+from profiles.pie_unet import PIE_UNet
 
 
 def count_parameters(model):
@@ -290,6 +290,6 @@ if __name__ == "__main__":
         save_results_csv(results, args.output)
     else:
         # Save to default location
-        from ablation.profile.config import OUTPUT_CONFIG
+        from profiles.config import OUTPUT_CONFIG
         output_path = OUTPUT_CONFIG["results_dir"] / "profile_metrics.csv"
         save_results_csv(results, output_path)
