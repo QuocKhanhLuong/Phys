@@ -40,12 +40,12 @@ def create_comparison_grid():
     sample_img = Image.open(sample_path)
     img_width, img_height = sample_img.size
     
-    # Grid settings - BALANCED FONTS
-    header_height = 180     # Reduced from 250
-    row_label_width = 500   # Reduced from 800
+    # Grid settings - ADJUSTED ROW FONTS
+    header_height = 180     # Keep header large
+    row_label_width = 400   # Reduced width slightly
     padding = 20
     bg_color = (0, 0, 0)
-    legend_height = 150     # Reduced from 200
+    legend_height = 150
     
     # Calculate total dimensions
     num_cols = len(PATIENTS)
@@ -57,10 +57,10 @@ def create_comparison_grid():
     canvas = Image.new('RGB', (total_width, total_height), color=bg_color)
     draw = ImageDraw.Draw(canvas)
     
-    # Load fonts (BALANCED SIZES)
+    # Load fonts (SMALLER ROW LABELS)
     try:
         header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 100)
-        row_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 80)
+        row_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 60)  # Reduced from 80
         legend_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 70)
     except:
         print("Warning: Custom fonts not found, using default (might be small)")
