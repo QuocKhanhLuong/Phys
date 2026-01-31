@@ -291,7 +291,7 @@ python scripts/visualize_model_comparison.py
 </p>
 
 <p align="center">
-  <em>Segmentation results on ACDC test patients. Rows: Input MRI, Ground Truth, PGE-UNet (Ours). Columns: Different patients (103-114).<br>
+  <em>Segmentation results on ACDC test patients. Rows: Input MRI, Ground Truth, PGE-UNet. Columns: Different patients (103-114).<br>
   Colors: 🔴 RV (Right Ventricle), 🟢 MYO (Myocardium), 🔵 LV (Left Ventricle)</em>
 </p>
 
