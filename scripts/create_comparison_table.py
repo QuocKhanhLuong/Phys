@@ -18,7 +18,7 @@ PATIENT_LABELS = ["Patient 103", "Patient 104", "Patient 105", "Patient 112", "P
 
 # Rows = Image types
 IMAGE_TYPES = ["InputMRI", "GroundTruth", "PIE-UNet"]
-ROW_LABELS = ["Input MRI", "Ground Truth", "PGE-UNet (Ours)"]
+ROW_LABELS = ["Input MRI", "Ground Truth", "PGE-UNet"]
 
 # Slice to use
 SLICE_NAME = "ED_slice004"
