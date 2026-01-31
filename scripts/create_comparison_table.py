@@ -13,8 +13,8 @@ VIS_OUTPUT_DIR_LOWER = os.path.join(BASE_DIR, "visualization_outputs", "model_co
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
 # Columns = Patients
-PATIENTS = ["patient103", "patient104", "patient105", "patient112", "patient113", "patient114"]
-PATIENT_LABELS = ["Patient 103", "Patient 104", "Patient 105", "Patient 112", "Patient 113", "Patient 114"]
+PATIENTS = ["patient103", "patient104", "patient105", "patient112", "patient113"]
+PATIENT_LABELS = ["Patient 103", "Patient 104", "Patient 105", "Patient 112", "Patient 113"]
 
 # Rows = Image types
 IMAGE_TYPES = ["InputMRI", "GroundTruth", "PIE-UNet"]
