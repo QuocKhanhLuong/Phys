@@ -40,12 +40,12 @@ def create_comparison_grid():
     sample_img = Image.open(sample_path)
     img_width, img_height = sample_img.size
     
-    # Grid settings - ADJUSTED ROW FONTS
-    header_height = 180     # Keep header large
-    row_label_width = 400   # Reduced width slightly
+    # Grid settings - SMALLER FONTS
+    header_height = 130     # Reduced from 180
+    row_label_width = 350   # Reduced from 400
     padding = 20
     bg_color = (0, 0, 0)
-    legend_height = 150
+    legend_height = 120     # Reduced from 150
     
     # Calculate total dimensions
     num_cols = len(PATIENTS)
@@ -57,11 +57,11 @@ def create_comparison_grid():
     canvas = Image.new('RGB', (total_width, total_height), color=bg_color)
     draw = ImageDraw.Draw(canvas)
     
-    # Load fonts (SMALLER ROW LABELS)
+    # Load fonts (REDUCED SIZES)
     try:
-        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 100)
-        row_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 60)  # Reduced from 80
-        legend_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 70)
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 80)   # Requested 80
+        row_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 50)        # Smaller row labels
+        legend_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 60)
     except:
         print("Warning: Custom fonts not found, using default (might be small)")
         header_font = ImageFont.load_default()
@@ -100,7 +100,7 @@ def create_comparison_grid():
                 print(f"Warning: Not found: {img_path}")
     
     # Draw legend at bottom
-    legend_y = total_height - legend_height + 40
+    legend_y = total_height - legend_height + 30
     legend_items = [
         ("Right Ventricle (RV)", (255, 0, 0)),
         ("Myocardium (MYO)", (0, 255, 0)),
@@ -108,15 +108,15 @@ def create_comparison_grid():
     ]
     
     # Calculate legend total width to center it properly
-    legend_item_width = 900  # Detailed width adjustment
+    legend_item_width = 800  # Adjusted for smaller font
     legend_start_x = total_width // 2 - (len(legend_items) * legend_item_width) // 2
     
     for i, (label, color) in enumerate(legend_items):
         x = legend_start_x + i * legend_item_width
-        # Draw larger color box (70x70)
-        draw.rectangle([x, legend_y, x + 70, legend_y + 70], fill=color, outline=color)
+        # Draw color box (60x60)
+        draw.rectangle([x, legend_y, x + 60, legend_y + 60], fill=color, outline=color)
         # Draw label next to box
-        draw.text((x + 90, legend_y - 5), label, fill=(255, 255, 255), font=legend_font)
+        draw.text((x + 80, legend_y - 8), label, fill=(255, 255, 255), font=legend_font)
     
     # Save result
     os.makedirs(ASSETS_DIR, exist_ok=True)
