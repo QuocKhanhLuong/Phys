@@ -1,13 +1,6 @@
 # PGE-UNet: Physics-Guided Encoder for Efficient Cine CMR Segmentation
 
-<p align="center">
-  <img src="assets/model_comparison.png" alt="Model Comparison" width="100%">
-</p>
 
-<p align="center">
-  <b>Qualitative comparison of segmentation results on ACDC test set.</b><br>
-  From left to right: Input MRI, Ground Truth, PIE-UNet (Ours), Swin-Unet, SwinUNETR, TransUNet, nnUNet, UNet++.
-</p>
 
 ---
 
@@ -293,31 +286,12 @@ python scripts/visualize_model_comparison.py
 
 ## Results
 
-### Quantitative Results on ACDC Test Set
-
-| Method | RV Dice ↑ | MYO Dice ↑ | LV Dice ↑ | Mean Dice ↑ | Mean HD95 ↓ |
-|--------|-----------|------------|-----------|-------------|-------------|
-| nnUNet | 0.9012 | 0.8756 | 0.9324 | 0.9031 | 1.3421 |
-| TransUNet | 0.8845 | 0.8621 | 0.9178 | 0.8881 | 1.5623 |
-| SwinUNETR | 0.8923 | 0.8698 | 0.9256 | 0.8959 | 1.4102 |
-| Swin-Unet | 0.8756 | 0.8512 | 0.9089 | 0.8786 | 1.6234 |
-| UNet++ | 0.8634 | 0.8423 | 0.9012 | 0.8690 | 1.7821 |
-| **PIE-UNet (Ours)** | **0.9140** | **0.8874** | **0.9442** | **0.9152** | **1.1055** |
-
-### Qualitative Results
-
 <p align="center">
-  <img src="assets/model_comparison.png" alt="Qualitative Comparison" width="100%">
-</p>
-
-### Per-Patient Segmentation Results
-
-<p align="center">
-  <img src="assets/patient_comparison_grid.png" alt="Per-Patient Comparison" width="80%">
+  <img src="assets/patient_comparison_grid.png" alt="Segmentation Results" width="100%">
 </p>
 
 <p align="center">
-  <em>Segmentation results on 6 ACDC test patients (103-114). Left: Input MRI | Center: Ground Truth | Right: PGE-UNet prediction.<br>
+  <em>Segmentation results on ACDC test patients. Rows: Input MRI, Ground Truth, PGE-UNet (Ours). Columns: Different patients (103-114).<br>
   Colors: 🔴 RV (Right Ventricle), 🟢 MYO (Myocardium), 🔵 LV (Left Ventricle)</em>
 </p>
 
