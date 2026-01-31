@@ -60,8 +60,8 @@ def find_profile_weights(profile_name, weights_dir):
     results = []
     for w_path in sorted(weight_files):
         # Extract weight type from filename
-        # E.g., "best_model_XL_dice.pth" -> "dice"
-        #       "best_model_XL.pth" -> "default"
+        # E.g., "best_model_L_dice.pth" -> "dice"
+        #       "best_model_L.pth" -> "default"
         filename = w_path.stem  # Remove .pth
         base_name = f"best_model_{profile_name}"
         
@@ -192,7 +192,7 @@ def evaluate_profile_3d(profile_name, weights_path=None, weight_name=None, verbo
     - 3D Volumetric: Dice, HD95 (same as evaluate_acdc.py)
     
     Args:
-        profile_name: Profile to evaluate (T, M, XL, etc.)
+        profile_name: Profile to evaluate (S, M, L, etc.)
         weights_path: Path to weight file (if None, will auto-detect)
         weight_name: Name/identifier for this weight variant
         verbose: Print detailed output
