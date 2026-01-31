@@ -1,11 +1,10 @@
 """
-Create a comparison grid image with patients as rows and 
-InputMRI, GroundTruth, PGE-UNet as columns.
-Output: Single combined image for README
+Create a comparison grid image with:
+- Columns = Patients (103, 104, 105, 112, 113, 114)
+- Rows = Image types (Input MRI, Ground Truth, PGE-UNet)
 """
 import os
 from PIL import Image, ImageDraw, ImageFont
-import numpy as np
 
 # Configuration
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,106 +12,120 @@ VIS_OUTPUT_DIR = os.path.join(BASE_DIR, "visualization_outputs", "model_comparis
 VIS_OUTPUT_DIR_LOWER = os.path.join(BASE_DIR, "visualization_outputs", "model_comparison", "output")
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 
-# Patients to include
+# Columns = Patients
 PATIENTS = ["patient103", "patient104", "patient105", "patient112", "patient113", "patient114"]
+PATIENT_LABELS = ["Patient 103", "Patient 104", "Patient 105", "Patient 112", "Patient 113", "Patient 114"]
 
-# Columns to display
-COLUMNS = ["InputMRI", "GroundTruth", "PIE-UNet"]
-COLUMN_LABELS = ["Input Image", "Ground Truth", "PGE-UNet (Ours)"]
+# Rows = Image types
+IMAGE_TYPES = ["InputMRI", "GroundTruth", "PIE-UNet"]
+ROW_LABELS = ["Input MRI", "Ground Truth", "PGE-UNet (Ours)"]
 
-# Slice to use for each patient
+# Slice to use
 SLICE_NAME = "ED_slice004"
 
-def get_image_path(patient, column):
-    """Get the image path for a specific patient and column."""
+def get_image_path(patient, image_type):
+    """Get the image path for a specific patient and image type."""
     if patient in ["patient103", "patient104", "patient105"]:
         base_path = VIS_OUTPUT_DIR
     else:
         base_path = VIS_OUTPUT_DIR_LOWER
     
-    img_path = os.path.join(base_path, patient, column, f"{patient}_{SLICE_NAME}.png")
+    img_path = os.path.join(base_path, patient, image_type, f"{patient}_{SLICE_NAME}.png")
     return img_path
 
 def create_comparison_grid():
-    """Create a grid comparison image like the reference."""
+    """Create a grid: Rows = image types, Columns = patients."""
     # Get dimensions from sample image
-    sample_path = get_image_path(PATIENTS[0], COLUMNS[0])
+    sample_path = get_image_path(PATIENTS[0], IMAGE_TYPES[0])
     sample_img = Image.open(sample_path)
     img_width, img_height = sample_img.size
     
     # Grid settings
-    header_height = 40
-    padding = 4
-    bg_color = (0, 0, 0)  # Black background like reference
+    header_height = 100     # Increased from 50
+    row_label_width = 300   # Increased from 140
+    padding = 10            # Increased padding
+    bg_color = (0, 0, 0)    # Black background
+    legend_height = 100     # Increased from 50
     
     # Calculate total dimensions
-    num_cols = len(COLUMNS)
-    num_rows = len(PATIENTS)
-    total_width = num_cols * img_width + (num_cols + 1) * padding
-    total_height = header_height + num_rows * img_height + (num_rows + 1) * padding + 40  # +40 for legend
+    num_cols = len(PATIENTS)
+    num_rows = len(IMAGE_TYPES)
+    total_width = row_label_width + num_cols * img_width + (num_cols + 1) * padding
+    total_height = header_height + num_rows * img_height + (num_rows + 1) * padding + legend_height
     
-    # Create canvas (black background)
+    # Create canvas
     canvas = Image.new('RGB', (total_width, total_height), color=bg_color)
     draw = ImageDraw.Draw(canvas)
     
-    # Try to load fonts
+    # Load fonts (Try to load much larger fonts)
     try:
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
-        small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
+        # Increase font size ~3-4x
+        header_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
+        row_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 45)
+        legend_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 40)
     except:
-        font = ImageFont.load_default()
-        small_font = font
+        print("Warning: Custom fonts not found, using default (might be small)")
+        header_font = ImageFont.load_default()
+        row_font = header_font
+        legend_font = header_font
     
-    # Draw column headers
-    for col_idx, col_label in enumerate(COLUMN_LABELS):
-        x = padding + col_idx * (img_width + padding) + img_width // 2
+    # Draw column headers (Patient names)
+    for col_idx, patient_label in enumerate(PATIENT_LABELS):
+        x = row_label_width + padding + col_idx * (img_width + padding) + img_width // 2
         y = header_height // 2
         
-        # Center text
-        bbox = draw.textbbox((0, 0), col_label, font=font)
+        bbox = draw.textbbox((0, 0), patient_label, font=header_font)
         text_width = bbox[2] - bbox[0]
-        draw.text((x - text_width // 2, y - 7), col_label, fill=(255, 255, 255), font=font)
+        draw.text((x - text_width // 2, y - 8), patient_label, fill=(255, 255, 255), font=header_font)
     
-    # Paste images
-    for row_idx, patient in enumerate(PATIENTS):
+    # Draw row labels and images
+    for row_idx, row_label in enumerate(ROW_LABELS):
         y_pos = header_height + padding + row_idx * (img_height + padding)
         
-        for col_idx, col_name in enumerate(COLUMNS):
-            x_pos = padding + col_idx * (img_width + padding)
+        # Draw row label (left side)
+        bbox = draw.textbbox((0, 0), row_label, font=row_font)
+        text_height = bbox[3] - bbox[1]
+        draw.text((10, y_pos + img_height // 2 - text_height // 2), row_label, fill=(255, 255, 255), font=row_font)
+        
+        # Paste images for each patient
+        for col_idx, patient in enumerate(PATIENTS):
+            x_pos = row_label_width + padding + col_idx * (img_width + padding)
             
-            img_path = get_image_path(patient, col_name)
+            img_path = get_image_path(patient, IMAGE_TYPES[row_idx])
             if os.path.exists(img_path):
                 img = Image.open(img_path)
                 canvas.paste(img, (x_pos, y_pos))
             else:
-                # Draw placeholder
                 draw.rectangle([x_pos, y_pos, x_pos + img_width, y_pos + img_height], 
                               outline=(100, 100, 100), width=1)
-                draw.text((x_pos + 10, y_pos + img_height // 2), "Not found", fill=(150, 150, 150))
-                print(f"Warning: Image not found: {img_path}")
+                print(f"Warning: Not found: {img_path}")
     
     # Draw legend at bottom
-    legend_y = total_height - 30
+    legend_y = total_height - legend_height + 25  # Adjusted Y position
     legend_items = [
-        ("Right Ventricle (RV)", (255, 0, 0)),    # Red
-        ("Myocardium (MYO)", (0, 255, 0)),        # Green
-        ("Left Ventricle (LV)", (0, 0, 255)),    # Blue
+        ("Right Ventricle (RV)", (255, 0, 0)),
+        ("Myocardium (MYO)", (0, 255, 0)),
+        ("Left Ventricle (LV)", (0, 0, 255)),
     ]
     
-    legend_start_x = total_width // 2 - 250
-    for i, (label, color) in enumerate(legend_items):
-        x = legend_start_x + i * 180
-        # Draw color box
-        draw.rectangle([x, legend_y, x + 15, legend_y + 15], fill=color, outline=color)
-        # Draw label
-        draw.text((x + 20, legend_y), label, fill=(255, 255, 255), font=small_font)
+    # Calculate legend total width to center it properly
+    legend_item_width = 600  # Estimate width per item including text
+    legend_start_x = total_width // 2 - (len(legend_items) * legend_item_width) // 2
     
-    # Save the result
+    for i, (label, color) in enumerate(legend_items):
+        x = legend_start_x + i * legend_item_width
+        # Draw larger color box
+        draw.rectangle([x, legend_y, x + 40, legend_y + 40], fill=color, outline=color)
+        # Draw label next to box
+        draw.text((x + 60, legend_y), label, fill=(255, 255, 255), font=legend_font)
+    
+    # Save result
     os.makedirs(ASSETS_DIR, exist_ok=True)
     output_path = os.path.join(ASSETS_DIR, "patient_comparison_grid.png")
     canvas.save(output_path, quality=95)
-    print(f"✅ Saved comparison grid to: {output_path}")
-    print(f"   Dimensions: {total_width} x {total_height}")
+    print(f"✅ Saved: {output_path}")
+    print(f"   Size: {total_width} x {total_height}")
+    print(f"   Layout: {num_rows} rows (image types) x {num_cols} columns (patients)")
     
     return output_path
 
