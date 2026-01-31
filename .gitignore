@@ -111,6 +111,10 @@ logs/
 *.mp4
 *.avi
 
+# Exception: Keep assets for README
+!assets/
+!assets/**
+
 # Backup files
 *.bak
 *.backup
