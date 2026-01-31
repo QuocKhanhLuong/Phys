@@ -1,4 +1,4 @@
-# PGE-UNet: Physics-Guided Encoder for Efficient Cine CMR Segmentation
+# Intergrating Physics Guidance Into Deep Learning for Cine Cardiovascular Segmentation
 
 ---
 
