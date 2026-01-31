@@ -20,7 +20,11 @@
 
 ## Overview
 
-**PGE-UNet** (Physics-Guided Encoder UNet) integrates physics-inspired noise estimation (ePURE) with a UNet++ architecture enhanced by Maxwell equation constraints for robust cardiac MRI segmentation. The model achieves state-of-the-art performance on multiple cardiac segmentation benchmarks.
+Cine cardiovascular magnetic resonance (CMR) provides dynamic sequences for quantifying clinically important indices such as ventricular volumes and ejection fraction. Fast and accurate deep segmentation model is therefore valuable for timely analysis, reducing manual workload and improving reproducibility in routine workflows. However, most existing segmentation models remain largely data-driven and lack explicit physical constraints, which can reduce prediction plausibility under realistic acquisition variability.
+
+In this work, we present **PGE-UNet**, an efficient segmentation framework for cine CMR that incorporates radiofrequency-related information to promote physically plausible outputs. Specifically, it employs the proposed **Noise-Aware Encoder** with self-supervised noise estimation and smoothing mechanism for robust feature encoding, and the **Physics-Regularized Decoder** that enforce Maxwell-Helmholtz consistency under a pseudo transmit-field prior $\hat{B}^+_1$. Since transmit-field measurements are typically unavailable in standard protocols, we further introduce a simulator-based procedure to synthesize $\hat{B}^+_1$, enabling physics-regularized training without additional mapping sequences.
+
+Experiments on three public cine CMR benchmarks demonstrate strong accuracy in both DICE and HD95, achieving foreground average DICE of **0.9152** on ACDC, **0.8605** on M&Ms, and **0.9291** on SCD, while remaining lightweight with only **1.60 million parameters** in the default setting. Under CPU-only inference, the default configuration recorded an average latency of **72.38 ms** per case, making it suitable for deployment in time-sensitive and resource-constrained environments.
 
 ### Key Features
 
